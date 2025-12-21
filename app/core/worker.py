@@ -26,14 +26,14 @@ def update_model_log(app, model_name, task, df_results):
         
         # Logic giống app4.py: Đọc cũ -> Nối mới -> Giữ 10000 dòng
         if os.path.exists(log_path):
-            combined = pd.concat([pd.read_csv(log_path), df_results], ignore_index=True)
+            combined = pd.concat([pd.read_csv(log_path, sep='#'), df_results], ignore_index=True)
         else:
             combined = df_results
             
         if 'time_scaned' in combined.columns: 
             combined = combined.sort_values(by='time_scaned')
             
-        combined.tail(10000).to_csv(log_path, index=False)
+        combined.tail(10000).to_csv(log_path, index=False, sep='#')
         # Debug log để biết là đã ghi file
         # print(f"[Log] Saved result to {log_path}") 
     except Exception as e: 
@@ -116,7 +116,7 @@ def thread_pcap_worker(app):
                                 FILE_STATUS[fname] = 'Error'
                                 continue
                                 
-                            df_raw = pd.read_csv(csv_path)
+                            df_raw = pd.read_csv(csv_path, sep='#')
                             if df_raw.empty: 
                                 FILE_STATUS[fname] = 'Error'
                                 continue
@@ -183,7 +183,7 @@ def thread_pcap_worker(app):
                             print(f"[Worker Error] Processing {fname}: {e}")
                             traceback.print_exc()
                             FILE_STATUS[fname] = 'Error'
-                        finally: 
+                        finally:
                             shutil.rmtree(tmp_dir, ignore_errors=True)
                             
                 time.sleep(2)

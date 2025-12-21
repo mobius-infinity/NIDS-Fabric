@@ -1,148 +1,120 @@
-<!DOCTYPE html>
-<html lang="vi" data-theme="light">
-<head>
-    <meta charset="UTF-8">
-    <title>NIDS Security Fabric</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-   
-       <div class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="brand-group"><i class="fas fa-shield-alt"></i> <span>NIDS Fabric</span></div>
-            <div class="toggle-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></div>
-        </div>
-        
-        <div class="menu-section">Monitor</div>
-        <div id="menu-dashboard" class="menu-item active" onclick="switchView('dashboard')"><i class="fas fa-chart-pie"></i> <span>Dashboard</span></div>
-        <div id="menu-settings" class="menu-item" onclick="switchView('settings')"><i class="fas fa-cog"></i> <span>System Settings</span></div>
-        
-        <div class="menu-section">Binary Models</div>
-        <div class="menu-item" onclick="switchModel(this, 'Random Forest', 'binary')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'LightGBM', 'binary')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'DNN', 'binary')"><i class="fas fa-brain"></i> <span>DNN</span></div>
+{% extends "base.html" %}
 
-        <div class="menu-section">Multiclass Models</div>
-        <div class="menu-item" onclick="switchModel(this, 'Random Forest', 'multiclass')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'LightGBM', 'multiclass')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'DNN', 'multiclass')"><i class="fas fa-brain"></i> <span>DNN</span></div>
-
-        <div class="user-profile">
-            <img src="/static/avatars/admin_default.png" class="user-avatar" id="nav-avatar">
-            <div class="user-info">
-                <div class="user-name" id="nav-username">Loading...</div>
-                <div class="user-role">Administrator</div>
+{% block content %}
+    <div id="view-dashboard" class="view-section active">
+        <h2 style="margin-bottom: 24px; color: var(--text-main);">System Status</h2>
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-header"><span>CPU & RAM</span></div>
+                <div class="card-body">
+                    <div class="status-row"><span>CPU Usage</span><span id="cpu-val">0%</span></div>
+                    <div class="progress-container"><div id="cpu-bar" class="progress-fill" style="width: 0%; background: var(--text-main);"></div></div>
+                    <div class="status-row"><span>RAM Usage</span><span id="ram-val">0%</span></div>
+                    <div class="progress-container"><div id="ram-bar" class="progress-fill" style="width: 0%; background: var(--text-muted);"></div></div>
+                    <div style="height: 100px; margin-top:10px;"><canvas id="sysChart"></canvas></div>
+                </div>
             </div>
-            <a href="/logout" title="Logout" style="color:var(--text-muted); margin-left: auto;"><i class="fas fa-sign-out-alt"></i></a>
+            <div class="card widget-wide">
+                <div class="card-header"><span>Traffic Volume</span></div>
+                <div class="card-body"><canvas id="trafficChart"></canvas></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span>Threat Consensus</span></div>
+                <div class="card-body"><div style="height:180px;"><canvas id="threatChart"></canvas></div></div>
+            </div>
+            <div class="card widget-wide">
+                <div class="card-header"><span>Incoming Files</span></div>
+                <div class="card-body" style="padding:0;">
+                    <table style="margin:0;">
+                        <thead><tr><th>Filename</th><th>Size</th><th>Status</th></tr></thead>
+                        <tbody id="filesTableDashboard"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div class="main-content">
-        <div id="view-dashboard" class="view-section active">
-            <h2 style="margin-bottom: 24px; color: var(--text-main);">System Status</h2>
-            <div class="dashboard-grid">
-                <div class="card">
-                    <div class="card-header"><span>CPU & RAM</span></div>
-                    <div class="card-body">
-                        <div class="status-row"><span>CPU Usage</span><span id="cpu-val">0%</span></div>
-                        <div class="progress-container"><div id="cpu-bar" class="progress-fill" style="width: 0%; background: var(--text-main);"></div></div>
-                        <div class="status-row"><span>RAM Usage</span><span id="ram-val">0%</span></div>
-                        <div class="progress-container"><div id="ram-bar" class="progress-fill" style="width: 0%; background: var(--text-muted);"></div></div>
-                        <div style="height: 100px; margin-top:10px;"><canvas id="sysChart"></canvas></div>
-                    </div>
-                </div>
-                <div class="card widget-wide">
-                    <div class="card-header"><span>Traffic Volume</span></div>
-                    <div class="card-body"><canvas id="trafficChart"></canvas></div>
-                </div>
-                <div class="card">
-                    <div class="card-header"><span>Threat Consensus</span></div>
-                    <div class="card-body"><div style="height:180px;"><canvas id="threatChart"></canvas></div></div>
-                </div>
-                <div class="card widget-wide">
-                    <div class="card-header"><span>Incoming Files</span></div>
-                    <div class="card-body" style="padding:0;">
-                        <table style="margin:0;"><thead><tr><th>Filename</th><th>Size</th><th>Status</th></tr></thead><tbody id="filesTableDashboard"></tbody></table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="view-settings" class="view-section">
-            <h2 style="margin-bottom: 24px; color: var(--text-main);">Admin Settings</h2>
-            <div class="dashboard-grid">
-                <div class="card">
-                    <div class="card-header"><i class="fas fa-user-edit"></i> Profile</div>
-                    <div class="card-body">
-                        <form id="profileForm">
-                            <div class="setting-group" style="text-align:center; border:none;">
-                                <img src="/static/avatars/admin_default.png" id="setting-avatar" style="width:100px; height:100px; border-radius:50%; object-fit:cover; margin-bottom:15px; border:3px solid var(--text-main);">
-                                <br>
-                                <label class="btn" for="avatarUpload" style="cursor:pointer; font-size:0.8em;"><i class="fas fa-camera"></i> Change Avatar</label>
-                                <input type="file" id="avatarUpload" name="avatar" accept="image/*" style="display:none;" onchange="previewAvatar(event)">
-                            </div>
-                            <div class="setting-group">
-                                <label style="display:block; margin-bottom:8px; font-weight:600;">Display Name</label>
-                                <input type="text" class="form-input" id="setting-fullname" name="full_name">
-                            </div>
-                            <button type="button" class="btn btn-primary" onclick="updateProfile()" style="width:100%;">Save Profile</button>
-                        </form>
-                    </div>
-                </div>
-                <div class="card widget-wide">
-                    <div class="card-header"><i class="fas fa-cogs"></i> System Logic</div>
-                    <div class="card-body">
-                        <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center;">
-                            <div>
-                                <div style="font-weight:600;">Detection Mode</div>
-                                <div style="font-size:0.9em; color:#64748b;">
-                                    <strong style="color:var(--text-main)">Voting (default):</strong> Requires 2/6 models to agree.<br>
-                                    <strong>RF Only:</strong> Uses only Random Forest for faster decision.
-                                </div>
-                            </div>
-                            <label class="switch"><input type="checkbox" id="modeSwitch"><span class="slider"></span></label>
-                        </div>
-                        <div class="setting-group" style="border-bottom:none; margin-top:20px;">
-		    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-			<div>
-			    <div style="font-weight:600;">Voting Threshold</div>
-			    <div style="font-size:0.9em; color:#64748b;">
-				Minimum votes required to trigger an alert (Total: 6 models).
-			    </div>
-			</div>
-			<div style="font-weight:800; font-size:1.2em; color:var(--text-main);" id="thresh-display">2/6</div>
-		    </div>
-		    
-		    <input type="range" id="threshSlider" min="1" max="6" value="2" style="width:100%; cursor:pointer;" oninput="document.getElementById('thresh-display').textContent = this.value + '/6'">
-		    
-		    <div style="display:flex; justify-content:space-between; font-size:0.8em; color:#94a3b8; margin-top:5px;">
-			<span>High Sensitivity (1)</span>
-			<span>High Precision (6)</span>
-		    </div>
-		</div>
-                        <div style="text-align:right;">
-                            <button class="btn btn-primary" onclick="saveSystemSettings()"><i class="fas fa-save"></i> Apply Config</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="view-model" class="view-section">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                <h2 id="model-title" style="margin: 0;">Model Name</h2>
-                <button class="btn" onclick="loadLogs()"><i class="fas fa-sync-alt"></i> Refresh</button>
-            </div>
+    <div id="view-settings" class="view-section">
+        <h2 style="margin-bottom: 24px; color: var(--text-main);">Admin Settings</h2>
+        <div class="dashboard-grid">
             <div class="card">
-                <div class="card-body" style="padding: 0;">
-                    <table>
-                        <thead><tr><th>Time</th><th>File</th><th>Src IP</th><th>Dst IP</th><th>Prediction (Label)</th></tr></thead>
+                <div class="card-header"><i class="fas fa-user-edit"></i> Profile</div>
+                <div class="card-body">
+                    <form id="profileForm">
+                        <div class="setting-group" style="text-align:center; border:none;">
+                            <img src="{{ url_for('static', filename='avatars/admin_default.png') }}" id="setting-avatar" style="width:100px; height:100px; border-radius:50%; object-fit:cover; margin-bottom:15px; border:3px solid var(--text-main);">
+                            <br>
+                            <label class="btn" for="avatarUpload" style="cursor:pointer; font-size:0.8em;"><i class="fas fa-camera"></i> Change Avatar</label>
+                            <input type="file" id="avatarUpload" name="avatar" accept="image/*" style="display:none;" onchange="previewAvatar(event)">
+                        </div>
+                        <div class="setting-group">
+                            <label style="display:block; margin-bottom:8px; font-weight:600;">Display Name</label>
+                            <input type="text" class="form-input" id="setting-fullname" name="full_name">
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="updateProfile()" style="width:100%;">Save Profile</button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card widget-wide">
+                <div class="card-header"><i class="fas fa-cogs"></i> System Logic</div>
+                <div class="card-body">
+                    <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-weight:600;">Detection Mode</div>
+                            <div style="font-size:0.9em; color:#64748b;">
+                                <strong style="color:var(--text-main)">Voting (default):</strong> Requires consensus.<br>
+                                <strong>RF Only:</strong> Uses only Random Forest (faster).
+                            </div>
+                        </div>
+                        <label class="switch"><input type="checkbox" id="modeSwitch"><span class="slider"></span></label>
+                    </div>
+                    
+                    <div class="setting-group" style="border-bottom:none; margin-top:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <div>
+                                <div style="font-weight:600;">Voting Threshold</div>
+                                <div style="font-size:0.9em; color:#64748b;">Minimum votes to trigger alert (Max 6).</div>
+                            </div>
+                            <div style="font-weight:800; font-size:1.2em; color:var(--text-main);" id="thresh-display">2/6</div>
+                        </div>
+                        <input type="range" id="threshSlider" min="1" max="6" value="2" style="width:100%; cursor:pointer;" oninput="document.getElementById('thresh-display').textContent = this.value + '/6'">
+                    </div>
+
+                    <div style="text-align:right;">
+                        <button class="btn btn-primary" onclick="saveSystemSettings()"><i class="fas fa-save"></i> Apply Config</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-model" class="view-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2 id="model-title" style="margin: 0;">Model Name</h2>
+            <button class="btn" onclick="resetLazyLoad()"><i class="fas fa-sync-alt"></i> Refresh</button>
+        </div>
+        <div class="card">
+            <div class="card-body" style="padding: 0; display: flex; flex-direction: column; height: 600px;">
+                <div id="logsScrollContainer" style="flex: 1; overflow-y: auto; border-bottom: 1px solid var(--border-color);">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 10;">
+                            <tr>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); width:60px;">#</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Time</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">File</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Src IP</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Src Port</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Dst IP</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Dst Port</th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Prediction</th>
+                            </tr>
+                        </thead>
                         <tbody id="modelLogsBody"></tbody>
                     </table>
+                </div>
+                <div id="logsLoadingIndicator" style="padding: 12px; text-align: center; color: var(--text-muted); display: none;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading more...
                 </div>
             </div>
         </div>
@@ -157,5 +129,4 @@
         <div class="forti-content" id="panelContent">
             </div>
     </div>
-</body>
-</html>
+{% endblock %}

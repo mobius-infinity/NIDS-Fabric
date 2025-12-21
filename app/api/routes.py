@@ -162,26 +162,42 @@ def get_flows():
     model = request.args.get('model', 'Random Forest')
     task = request.args.get('task', 'binary')
     logs_folder = current_app.config['LOGS_FOLDER']
+    offset = int(request.args.get('offset', 0))
+    limit = int(request.args.get('limit', 50))
     
     path = os.path.join(logs_folder, f"{model.replace(' ', '_')}_{task}.csv")
     
     if not os.path.exists(path): 
-        return jsonify({"flows": []})
+        return jsonify({"flows": [], "total": 0})
     
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, sep='#')
         # Clean column names (remove %)
         df.columns = [str(c).replace('%', '').strip() for c in df.columns]
         
         if request.args.get('filename'): 
             df = df[df['file_scaned'] == request.args.get('filename')]
-            
-        # Trả về 100 dòng mới nhất
+        
+        # Prefer sorting by FLOW_START_MILLISECONDS (numeric) for chronological order
+        if 'FLOW_START_MILLISECONDS' in df.columns:
+            df['FLOW_START_MILLISECONDS'] = pd.to_numeric(df['FLOW_START_MILLISECONDS'], errors='coerce')
+            df = df.sort_values(by='FLOW_START_MILLISECONDS', ascending=False)
+        else:
+            df = df.sort_values(by='time_scaned', ascending=False)
+
+        total = len(df)
+
+        # Apply pagination
+        flows = df.iloc[offset:offset+limit].fillna('').to_dict('records')
+        # Attach sequence number for UI (1-based, relative to full sorted list)
+        for i, rec in enumerate(flows):
+            rec['seq'] = int(offset + i + 1)
+        
         return jsonify({
-            "flows": df.sort_values(by='time_scaned', ascending=False)
-                       .head(100)
-                       .fillna('')
-                       .to_dict('records')
+            "flows": flows,
+            "total": total,
+            "offset": offset,
+            "limit": limit
         })
     except Exception as e: 
         return jsonify({"error": str(e)})
@@ -196,7 +212,7 @@ def get_details(flow_id):
     path = os.path.join(logs_folder, f"{model.replace(' ', '_')}_{task}.csv")
     
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, sep='#')
         df.columns = [str(c).replace('%', '').strip() for c in df.columns]
         
         # Tìm dòng có id khớp (chuyển về string để so sánh an toàn)

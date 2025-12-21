@@ -2,6 +2,16 @@ let currentView = 'dashboard';
 let sysChart, trafficChart, threatChart;
 let selectedModel = '', selectedTask = '';
 
+// Lazy loading state
+let logsOffset = 0;
+let logsTotal = 0;
+let isLoadingLogs = false;
+const logsLimitPerPage = 50;
+let logsAutoFillCount = 0;
+const logsAutoFillMax = 0; // disable automatic auto-fill; require user scroll to load more
+// maxAutoFillPages deprecated
+let scrollTimer = null;
+
 document.addEventListener('DOMContentLoaded', () => {
     // Chỉ init charts nếu element tồn tại (tránh lỗi ở trang login)
     if(document.getElementById('sysChart')) {
@@ -9,6 +19,12 @@ document.addEventListener('DOMContentLoaded', () => {
         loadUserInfo();
         setInterval(updateDashboard, 2000);
         updateDashboard();
+    }
+    
+    // Setup scroll event for lazy loading
+    const scrollContainer = document.getElementById('logsScrollContainer');
+    if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', onLogsScroll);
     }
 });
 
@@ -39,6 +55,16 @@ async function loadUserInfo() {
 
 function previewAvatar(event) { 
     document.getElementById('setting-avatar').src = URL.createObjectURL(event.target.files[0]); 
+}
+
+function formatEpochOrString(val) {
+    if (val === null || val === undefined || val === '') return '-';
+    const s = String(val).trim();
+    // If looks like an epoch seconds integer
+    if (/^\d+$/.test(s)) {
+        try { return new Date(Number(s) * 1000).toLocaleString(); } catch(e) { return s; }
+    }
+    return s;
 }
 
 async function updateProfile() {
@@ -95,32 +121,113 @@ function switchModel(el, model, task) {
     switchView('model');
     document.getElementById('view-model').classList.add('active');
     document.getElementById('model-title').textContent = `${model} (${task})`;
-    loadLogs();
+    resetLazyLoad();
 }
 
-async function loadLogs() {
-    const tbody = document.getElementById('modelLogsBody');
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
+function resetLazyLoad() {
+    logsOffset = 0;
+    logsTotal = 0;
+    isLoadingLogs = false;
+    logsAutoFillCount = 0;
+    document.getElementById('modelLogsBody').innerHTML = '';
+    const container = document.getElementById('logsScrollContainer');
+    if (container) {
+        container.scrollTop = 0;
+        // ensure a single scroll listener is attached
+        try { container.removeEventListener('scroll', onLogsScroll); } catch(e){}
+        container.addEventListener('scroll', onLogsScroll);
+    }
+    loadMoreLogs();
+}
+
+function inspectLogsHolder(note) {
+    const c = document.getElementById('logsScrollContainer');
+    if (!c) { console.debug('[Logs] holder missing', note); return; }
+    const cs = window.getComputedStyle(c);
+    console.debug('[Logs] holder', note, {
+        clientHeight: c.clientHeight,
+        scrollHeight: c.scrollHeight,
+        scrollTop: c.scrollTop,
+        overflowY: cs.overflowY,
+        display: cs.display,
+        visible: !!(c.offsetWidth || c.offsetHeight)
+    });
+}
+
+async function loadMoreLogs() {
+    if (isLoadingLogs || (logsOffset >= logsTotal && logsTotal > 0)) return;
+    // set loading flag immediately to prevent re-entrant calls
+    isLoadingLogs = true;
+    console.log('[Logs] loadMoreLogs called', { logsOffset, logsTotal, isLoadingLogs });
+    document.getElementById('logsLoadingIndicator').style.display = 'block';
+    
     try {
-        const res = await fetch(`/api/get_flows?model=${selectedModel}&task=${selectedTask}`);
+        const modelParam = encodeURIComponent(selectedModel || 'Random Forest');
+        const taskParam = encodeURIComponent(selectedTask || 'binary');
+        const res = await fetch(`/api/get_flows?model=${modelParam}&task=${taskParam}&offset=${logsOffset}&limit=${logsLimitPerPage}`);
         const data = await res.json();
-        if (!data.flows || !data.flows.length) { 
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No data</td></tr>'; 
-            return; 
+        console.log('[Logs] api response', { offset: logsOffset, total: data.total, count: (data.flows||[]).length });
+        if (data.error) {
+            console.error('API error', data.error);
+            if (logsOffset === 0) document.getElementById('modelLogsBody').innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px;">Error: ${data.error}</td></tr>`;
+        } else if (!data.flows || !data.flows.length) {
+            if (logsOffset === 0) {
+                document.getElementById('modelLogsBody').innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 20px;">No data</td></tr>';
+            }
+        } else {
+            logsTotal = data.total;
+            const tbody = document.getElementById('modelLogsBody');
+            const newRows = data.flows.map(f => {
+                let isSafe = String(f.result).toLowerCase().includes('safe') || 
+                             String(f.result).toLowerCase().includes('benign') || 
+                             f.result == '0';
+                return `<tr onclick="showDetails('${f.id}')" style="cursor: pointer; border-bottom: 1px solid var(--border-color);">
+                            <td style="padding: 12px; font-weight:600;">${f.seq ?? '-'}</td>
+                            <td style="padding: 12px;">${f.time_scaned?.split(' ')[1] || '-'}</td>
+                            <td style="padding: 12px;">${f.file_scaned}</td>
+                            <td style="padding: 12px;">${f.IPV4_SRC_ADDR}</td>
+                            <td style="padding: 12px;">${f.L4_SRC_PORT ?? '-'}</td>
+                            <td style="padding: 12px;">${f.IPV4_DST_ADDR}</td>
+                            <td style="padding: 12px;">${f.L4_DST_PORT ?? '-'}</td>
+                            <td style="padding: 12px;"><span class="badge ${isSafe?'badge-safe':'badge-danger'}">${f.result}</span></td>
+                        </tr>`;
+            }).join('');
+            tbody.innerHTML += newRows;
         }
-        tbody.innerHTML = data.flows.map(f => {
-            let isSafe = String(f.result).toLowerCase().includes('safe') || 
-                         String(f.result).toLowerCase().includes('benign') || 
-                         f.result == '0';
-            return `<tr onclick="showDetails('${f.id}')">
-                        <td>${f.time_scaned?.split(' ')[1] || '-'}</td>
-                        <td>${f.file_scaned}</td>
-                        <td>${f.IPV4_SRC_ADDR}</td>
-                        <td>${f.IPV4_DST_ADDR}</td>
-                        <td><span class="badge ${isSafe?'badge-safe':'badge-danger'}">${f.result}</span></td>
-                    </tr>`;
-        }).join('');
-    } catch (e) { tbody.innerHTML = '<tr><td colspan="5">Error</td></tr>'; }
+        
+        logsOffset += logsLimitPerPage;
+            // If container still not scrollable but there are more logs, auto-fetch up to a cap
+            try {
+                const container = document.getElementById('logsScrollContainer');
+                if (container && container.scrollHeight <= container.clientHeight && logsOffset < logsTotal && logsAutoFillCount < logsAutoFillMax) {
+                    logsAutoFillCount += 1;
+                    console.log('[Logs] auto-fill triggered', { logsAutoFillCount, logsAutoFillMax, logsOffset, logsTotal });
+                    // small delay to allow DOM to render
+                    setTimeout(() => { loadMoreLogs(); }, 120);
+                }
+            } catch (e) { console.debug('auto-fill check failed', e); }
+    } catch (e) { 
+        console.error('Error loading logs:', e);
+        if (logsOffset === 0) document.getElementById('modelLogsBody').innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px;">Error loading logs</td></tr>`;
+    } finally {
+        isLoadingLogs = false;
+        document.getElementById('logsLoadingIndicator').style.display = 'none';
+        try { inspectLogsHolder('after load'); } catch(e){ console.log('inspectLogsHolder missing', e); }
+    }
+}
+
+function onLogsScroll() {
+    const container = document.getElementById('logsScrollContainer');
+    if (!container) return;
+    console.log('[Logs] onLogsScroll event', { scrollTop: container.scrollTop, clientHeight: container.clientHeight, scrollHeight: container.scrollHeight });
+    // debounce to avoid rapid-fire
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+        // Check if scrolled near bottom (within 200px)
+        if (container.scrollHeight - container.scrollTop - container.clientHeight < 200) {
+            loadMoreLogs();
+        }
+    }, 150);
 }
 
 // --- FORTIOS STYLE DETAILS ---
@@ -137,6 +244,8 @@ function showDetails(id) {
                 <div class="forti-group">
                     <div class="forti-group-title"><h3><b>General</h3></div>
                     <div class="forti-row"><span class="forti-label">Date/Time</span><span class="forti-val">${d.time_scaned}</span></div>
+                    <div class="forti-row"><span class="forti-label">Flow Start</span><span class="forti-val">${formatEpochOrString(d.FIRST_SWITCHED ?? d.FLOW_START_MILLISECONDS ?? d.FLOW_START)}</span></div>
+                    <div class="forti-row"><span class="forti-label">Flow End</span><span class="forti-val">${formatEpochOrString(d.LAST_SWITCHED ?? d.FLOW_END_MILLISECONDS ?? d.FLOW_END)}</span></div>
                     <div class="forti-row"><span class="forti-label">File Source</span><span class="forti-val">${d.file_scaned}</span></div>
                     <div class="forti-row"><span class="forti-label">Flow ID</span><span class="forti-val">${d.id}</span></div>
                 </div>
@@ -153,6 +262,18 @@ function showDetails(id) {
                     <div class="forti-row"><span class="forti-label">Port</span><span class="forti-val">${d.L4_DST_PORT}</span></div>
                 </div>
 
+                <div class="forti-group">
+                    <div class="forti-group-title">Flow Stats</div>
+                    <div class="forti-row"><span class="forti-label">Protocol</span><span class="forti-val">${d.PROTOCOL ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">L7 Proto</span><span class="forti-val">${d.L7_PROTO ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">In Packets</span><span class="forti-val">${d.IN_PKTS ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Out Packets</span><span class="forti-val">${d.OUT_PKTS ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Duration (ms)</span><span class="forti-val">${d.FLOW_DURATION_MILLISECONDS ?? d.FLOW_DURATION ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Max IP Len</span><span class="forti-val">${d.MAX_IP_PKT_LEN ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Retransmitted (bytes)</span><span class="forti-val">${d.RETRANSMITTED_IN_BYTES ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Src→Dst Avg Throughput</span><span class="forti-val">${d.SRC_TO_DST_AVG_THROUGHPUT ?? '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Dst→Src Avg Throughput</span><span class="forti-val">${d.DST_TO_SRC_AVG_THROUGHPUT ?? '-'}</span></div>
+                </div>
                 <div class="forti-group">
                     <div class="forti-group-title">Security</div>
                     <div class="forti-row"><span class="forti-label">Level</span><span class="badge ${isThreat?'badge-danger':'badge-safe'}">${isThreat?'Critical':'Notice'}</span></div>
