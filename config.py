@@ -16,3 +16,6 @@ class Config:
     LOGS_FOLDER = os.path.join(BASE_DIR, 'storage', 'model_logs')
     AVATAR_FOLDER = os.path.join(BASE_DIR, 'app', 'static', 'avatars')
     ML_ASSETS_DIR = os.path.join(BASE_DIR, 'ml_assets')
+    
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024 * 1024  # 10GB Upload limit
+    JSON_SORT_KEYS = False

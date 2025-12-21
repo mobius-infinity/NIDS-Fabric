@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NIDS Admin Dashboard{% endblock %}</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="brand-group"><i class="fas fa-shield-alt"></i> <span>NIDS Admin</span></div>
+            <div class="toggle-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></div>
+        </div>
+        
+        <div class="menu-section">Monitor</div>
+        <div id="menu-dashboard" class="menu-item active" onclick="switchView('dashboard')">
+            <i class="fas fa-chart-pie"></i> <span>Dashboard</span>
+        </div>
+        <div id="menu-settings" class="menu-item" onclick="switchView('settings')">
+            <i class="fas fa-cog"></i> <span>System Settings</span>
+        </div>
+        
+        <div class="menu-section">Binary Models</div>
+        <div class="menu-item" onclick="switchModel(this, 'Random Forest', 'binary')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
+        <div class="menu-item" onclick="switchModel(this, 'LightGBM', 'binary')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
+        <div class="menu-item" onclick="switchModel(this, 'DNN', 'binary')"><i class="fas fa-brain"></i> <span>DNN</span></div>
+
+        <div class="menu-section">Multiclass Models</div>
+        <div class="menu-item" onclick="switchModel(this, 'Random Forest', 'multiclass')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
+        <div class="menu-item" onclick="switchModel(this, 'LightGBM', 'multiclass')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
+        <div class="menu-item" onclick="switchModel(this, 'DNN', 'multiclass')"><i class="fas fa-brain"></i> <span>DNN</span></div>
+
+        <div class="user-profile">
+            <img src="{{ url_for('static', filename='avatars/admin_default.png') }}" class="user-avatar" id="nav-avatar">
+            <div class="user-info">
+                <div class="user-name" id="nav-username">Loading...</div>
+                <div class="user-role">Administrator</div>
+            </div>
+            <a href="{{ url_for('auth.logout') }}" title="Logout" style="color:var(--text-muted); margin-left: auto;">
+                <i class="fas fa-sign-out-alt"></i>
+            </a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

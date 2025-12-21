@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - NIDS Security</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #f1f5f9;
+        }
+        .login-card {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid var(--border);
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-header i {
+            font-size: 3em;
+            color: var(--text-main);
+            margin-bottom: 10px;
+        }
+        .login-header h1 {
+            margin: 0;
+            font-size: 1.5em;
+            color: var(--text-body);
+        }
+        .alert {
+            padding: 12px;
+            border-radius: 8px;
+            background: #fee2e2;
+            color: #dc2626;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-header">
+            <i class="fas fa-shield-alt"></i>
+            <h1>NIDS Admin Portal</h1>
+            <p style="color: var(--text-muted); font-size: 0.9em;">Secure Access Gateway</p>
+        </div>
+
+        {% if error %}
+        <div class="alert">
+            <i class="fas fa-exclamation-circle"></i> {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('auth.login') }}">
+            <div class="setting-group" style="border:none; margin-bottom: 15px; padding:0;">
+                <label style="font-weight: 600; font-size: 0.9em;">Username</label>
+                <input type="text" name="username" class="form-input" required placeholder="Enter username" style="margin-top: 5px;">
+            </div>
+            
+            <div class="setting-group" style="border:none; margin-bottom: 25px; padding:0;">
+                <label style="font-weight: 600; font-size: 0.9em;">Password</label>
+                <input type="password" name="password" class="form-input" required placeholder="••••••••" style="margin-top: 5px;">
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 1em;">
+                Log In <i class="fas fa-arrow-right" style="margin-left: 5px;"></i>
+            </button>
+        </form>
+    </div>
+</body>
+</html>
