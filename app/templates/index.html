@@ -25,12 +25,101 @@
             <div class="card widget-wide">
                 <div class="card-header"><span>Incoming Files</span></div>
                 <div class="card-body" style="padding:0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; gap:8px;">
+                        <div style="font-weight:600; color:var(--text-main);">Upload PCAP</div>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <input id="pcapUploadInput" type="file" accept=".pcap,.pcapng" style="display:none;" onchange="uploadPcap(event)">
+                            <button class="btn" onclick="document.getElementById('pcapUploadInput').click()"><i class="fas fa-upload"></i> Upload PCAP</button>
+                        </div>
+                    </div>
                     <table style="margin:0;">
                         <thead><tr><th>Filename</th><th>Size</th><th>Status</th></tr></thead>
-                        <tbody id="filesTableDashboard"></tbody>
+                        <tbody id="filesTableDashboard" style="cursor: pointer;"></tbody>
                     </table>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="view-flows" class="view-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2 style="margin: 0; color: var(--text-main);">Flows Summary</h2>
+            <button class="btn" onclick="loadFlowsSummary()"><i class="fas fa-sync-alt"></i> Refresh</button>
+        </div>
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header"><span>IP Summary (Top 10)</span></div>
+                <div class="card-body"><canvas id="ipSummaryChart"></canvas></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span>Flow Statistics</span></div>
+                <div class="card-body">
+                    <div class="status-row"><span>Total Flows</span><span id="totalFlowsCount" style="font-weight:800; font-size:1.2em;">0</span></div>
+                    <div style="margin-top:12px; padding:12px; background:var(--bg-secondary); border-radius:4px;">
+                        <div class="status-row"><span>Attack Flows</span><span id="attackFlowsCount" style="font-weight:800; font-size:1.2em; color:#ef4444;">0</span></div>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <div style="font-weight:600; margin-bottom:8px; color:var(--text-main);">Top Protocols</div>
+                        <div id="protocolList" style="font-size:0.9em;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="dashboard-grid">
+            <div class="card widget-wide">
+                <div class="card-header"><span>Attack Flow Details (Latest 10)</span></div>
+                <div class="card-body" style="padding:0; height:400px; overflow-y:auto;">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+                        <thead style="position:sticky; top:0; background:var(--bg-secondary);">
+                            <tr>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Src IP</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Src Port</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Dst IP</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Dst Port</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Protocol</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Threat Type</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">File</th>
+                            </tr>
+                        </thead>
+                        <tbody id="attackFlowsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-incoming-files" class="view-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2 style="margin: 0; color: var(--text-main);">Incoming Files</h2>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn" onclick="loadIncomingFiles()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                <input id="pcapUploadInputIncoming" type="file" accept=".pcap,.pcapng" style="display:none;" onchange="uploadPcap(event)">
+                <button class="btn" onclick="document.getElementById('pcapUploadInputIncoming').click()"><i class="fas fa-upload"></i> Upload PCAP</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body" style="padding:0;">
+                <table style="margin:0;">
+                    <thead>
+                        <tr>
+                            <th>Filename</th>
+                            <th>Size</th>
+                            <th>Status</th>
+                            <th>Upload Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="filesTableIncoming" style="cursor: pointer;"></tbody>
+                </table>
+            </div>
+        </div>
+        <div id="fileDetailsPanel" class="slide-overlay" onclick="closeFileDetails()" style="display:none;"></div>
+        <div class="forti-panel" id="pcapDetailPanel" style="display:none;">
+            <div class="forti-header">
+                <span><i class="fas fa-file" style="color:var(--text-main); margin-right:8px;"></i> PCAP File Details</span>
+                <button class="close-panel-btn" onclick="closeFileDetails()">&times;</button>
+            </div>
+            <div class="forti-content" id="pcapPanelContent"></div>
         </div>
     </div>
 
@@ -50,6 +139,19 @@
                         <div class="setting-group">
                             <label style="display:block; margin-bottom:8px; font-weight:600;">Display Name</label>
                             <input type="text" class="form-input" id="setting-fullname" name="full_name">
+                        </div>
+                        <div class="setting-group">
+                            <label style="display:block; margin-bottom:8px; font-weight:600;">Theme</label>
+                            <div style="display:flex; gap:12px; align-items:center;">
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="radio" id="themeLight" name="theme" value="light" style="cursor:pointer;">
+                                    <i class="fas fa-sun"></i> Light
+                                </label>
+                                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                    <input type="radio" id="themeDark" name="theme" value="dark" style="cursor:pointer;">
+                                    <i class="fas fa-moon"></i> Dark
+                                </label>
+                            </div>
                         </div>
                         <button type="button" class="btn btn-primary" onclick="updateProfile()" style="width:100%;">Save Profile</button>
                     </form>
@@ -90,9 +192,37 @@
     </div>
 
     <div id="view-model" class="view-section">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
             <h2 id="model-title" style="margin: 0;">Model Name</h2>
-            <button class="btn" onclick="resetLazyLoad()"><i class="fas fa-sync-alt"></i> Refresh</button>
+            <button class="btn" onclick="resetPagination()"><i class="fas fa-sync-alt"></i> Refresh</button>
+        </div>
+        <div style="margin-bottom: 12px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <i class="fas fa-search" style="color: var(--text-muted);"></i>
+                <input id="globalSearchInput" type="text" placeholder="Search logs..." style="flex:1; padding:8px 12px; border:1px solid var(--border-color); border-radius:4px; font-size:0.9em;">
+                <button class="btn" onclick="applyFilters()"><i class="fas fa-filter"></i> Filter</button>
+                <button class="btn" onclick="clearAllFilters()"><i class="fas fa-times"></i> Clear Filter</button>
+                <div style="position: relative; display: inline-block;">
+                    <button class="btn" style="background: #ef4444;" onclick="toggleClearLogsMenu()" title="Clear logs options"><i class="fas fa-trash"></i> Clear Logs <i class="fas fa-chevron-down" style="font-size:0.8em; margin-left:4px;"></i></button>
+                    <div id="clearLogsMenu" style="position: absolute; top: 100%; right: 0; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; min-width: 220px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; display: none; margin-top: 4px;">
+                        <div style="padding: 8px; border-bottom: 1px solid var(--border-color);">
+                            <button class="btn" style="width: 100%; background: #ef4444; justify-content: flex-start;" onclick="clearFilteredLogs(); toggleClearLogsMenu()">
+                                <i class="fas fa-filter"></i> Clear Filtered Logs
+                            </button>
+                        </div>
+                        <div style="padding: 8px; border-bottom: 1px solid var(--border-color);">
+                            <button class="btn" style="width: 100%; background: #f97316; justify-content: flex-start;" onclick="clearAllCurrentModel(); toggleClearLogsMenu()">
+                                <i class="fas fa-trash-alt"></i> Clear All (This Model)
+                            </button>
+                        </div>
+                        <div style="padding: 8px;">
+                            <button class="btn" style="width: 100%; background: #dc2626; justify-content: flex-start;" onclick="clearAllModels(); toggleClearLogsMenu()">
+                                <i class="fas fa-exclamation-triangle"></i> Clear All (All Models)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="card">
             <div class="card-body" style="padding: 0; display: flex; flex-direction: column; height: 600px;">
@@ -100,21 +230,40 @@
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 10;">
                             <tr>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); width:60px;">#</th>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Time</th>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">File</th>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Src IP</th>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Src Port</th>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Dst IP</th>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Dst Port</th>
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Prediction</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); width:50px;">#</th>
+                                <th id="headerTime" style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="setSortColumn('time')">Time</th>
+                                <th id="headerFile" style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="setSortColumn('file')">File</th>
+                                <th id="headerSrcIP" style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="setSortColumn('srcip')">Src IP</th>
+                                <th id="headerSrcPort" style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="setSortColumn('srcport')">Src Port</th>
+                                <th id="headerDstIP" style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="setSortColumn('dstip')">Dst IP</th>
+                                <th id="headerDstPort" style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="setSortColumn('dstport')">Dst Port</th>
+                                <th id="headerPrediction" style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="setSortColumn('prediction')">Prediction</th>
+                            </tr>
+                            <tr style="background: var(--bg-secondary);">
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"></th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"><input id="filterTime" type="text" placeholder="Time" style="width:100%; padding:4px; font-size:0.75em; border:1px solid var(--border-color); border-radius:2px;"></th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"><input id="filterFile" type="text" placeholder="File" style="width:100%; padding:4px; font-size:0.75em; border:1px solid var(--border-color); border-radius:2px;"></th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"><input id="filterSrcIP" type="text" placeholder="Src IP" style="width:100%; padding:4px; font-size:0.75em; border:1px solid var(--border-color); border-radius:2px;"></th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"><input id="filterSrcPort" type="text" placeholder="Port" style="width:100%; padding:4px; font-size:0.75em; border:1px solid var(--border-color); border-radius:2px;"></th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"><input id="filterDstIP" type="text" placeholder="Dst IP" style="width:100%; padding:4px; font-size:0.75em; border:1px solid var(--border-color); border-radius:2px;"></th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"><input id="filterDstPort" type="text" placeholder="Port" style="width:100%; padding:4px; font-size:0.75em; border:1px solid var(--border-color); border-radius:2px;"></th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);"><input id="filterPrediction" type="text" placeholder="Pred" style="width:100%; padding:4px; font-size:0.75em; border:1px solid var(--border-color); border-radius:2px;"></th>
                             </tr>
                         </thead>
                         <tbody id="modelLogsBody"></tbody>
                     </table>
                 </div>
                 <div id="logsLoadingIndicator" style="padding: 12px; text-align: center; color: var(--text-muted); display: none;">
-                    <i class="fas fa-spinner fa-spin"></i> Loading more...
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </div>
+                <div id="paginationControls" style="padding:12px; display:flex; justify-content:center; gap:8px; align-items:center;">
+                    <button class="btn" id="prevPageBtn" onclick="prevPage()" disabled>&lt; Prev</button>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="pageDisplay">Page 1 / 1</span>
+                        <input id="pageInput" type="number" min="1" value="1" style="width:70px; padding:6px; border-radius:4px; border:1px solid var(--border-color);">
+                        <button class="btn" onclick="gotoPage()">Go</button>
+                    </div>
+                    <button class="btn" id="nextPageBtn" onclick="nextPage()" disabled>Next &gt;</button>
                 </div>
             </div>
         </div>

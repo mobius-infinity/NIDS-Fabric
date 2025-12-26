@@ -22,6 +22,12 @@
         <div id="menu-dashboard" class="menu-item active" onclick="switchView('dashboard')">
             <i class="fas fa-chart-pie"></i> <span>Dashboard</span>
         </div>
+        <div id="menu-flows" class="menu-item" onclick="switchView('flows')">
+            <i class="fas fa-stream"></i> <span>Flows</span>
+        </div>
+        <div id="menu-incoming-files" class="menu-item" onclick="switchView('incoming-files')">
+            <i class="fas fa-file"></i> <span>Incoming Files</span>
+        </div>
         <div id="menu-settings" class="menu-item" onclick="switchView('settings')">
             <i class="fas fa-cog"></i> <span>System Settings</span>
         </div>
@@ -42,7 +48,10 @@
                 <div class="user-name" id="nav-username">Loading...</div>
                 <div class="user-role">Administrator</div>
             </div>
-            <a href="{{ url_for('auth.logout') }}" title="Logout" style="color:var(--text-muted); margin-left: auto;">
+            <button id="darkModeToggle" class="theme-toggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:1.1em; padding:0; margin-left:auto;">
+                <i class="fas fa-moon"></i>
+            </button>
+            <a href="{{ url_for('auth.logout') }}" title="Logout" style="color:var(--text-muted); margin-left: 8px;">
                 <i class="fas fa-sign-out-alt"></i>
             </a>
         </div>
