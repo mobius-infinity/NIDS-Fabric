@@ -8,12 +8,15 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # Paths
+    BASE_FOLDER = BASE_DIR
     NPROBE_PATH = "/usr/bin/nprobe"
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'storage', 'temp_uploads')
     INCOMING_FOLDER = os.path.join(BASE_DIR, 'storage', 'incoming_pcaps')
     EVIDENCE_FOLDER = os.path.join(BASE_DIR, 'storage', 'evidence_pcaps')
     PROCESSED_FOLDER = os.path.join(BASE_DIR, 'storage', 'processed_pcaps')
     LOGS_FOLDER = os.path.join(BASE_DIR, 'storage', 'model_logs')
+    PCAP_INFO_FOLDER = os.path.join(BASE_DIR, 'storage', 'info_pcaps')
+    IPS_FOLDER = os.path.join(BASE_DIR, 'storage', 'ips')
     AVATAR_FOLDER = os.path.join(BASE_DIR, 'app', 'static', 'avatars')
     ML_ASSETS_DIR = os.path.join(BASE_DIR, 'ml_assets')
     

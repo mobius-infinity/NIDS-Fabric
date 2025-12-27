@@ -65,8 +65,10 @@ def convert_pcap_to_csv(pcap_path, dump_dir):
         "--dump-path", abs_dump, 
         "--dump-format", "t", 
         "--csv-separator", "#",
-        "--dont-reforge-timestamps"
+        "--dont-reforge-timestamps",
+        "-F", "ip"  # Filter chỉ IPv4 flows
     ]
+    #print(f"[nProbe] Running command: {' '.join(cmd)}")
     try:
         # Chạy lệnh với timeout 600s
         subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
@@ -92,3 +94,4 @@ def convert_pcap_to_csv(pcap_path, dump_dir):
     except Exception as e:
         current_app.logger.exception("PCAP conversion error")
         return None
+

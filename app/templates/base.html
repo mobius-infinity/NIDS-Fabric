@@ -28,8 +28,8 @@
         <div id="menu-incoming-files" class="menu-item" onclick="switchView('incoming-files')">
             <i class="fas fa-file"></i> <span>Incoming Files</span>
         </div>
-        <div id="menu-settings" class="menu-item" onclick="switchView('settings')">
-            <i class="fas fa-cog"></i> <span>System Settings</span>
+        <div id="menu-ips-database" class="menu-item" onclick="switchView('ips-database')">
+            <i class="fas fa-shield"></i> <span>IPS Database</span>
         </div>
         
         <div class="menu-section">Binary Models</div>
@@ -41,6 +41,11 @@
         <div class="menu-item" onclick="switchModel(this, 'Random Forest', 'multiclass')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
         <div class="menu-item" onclick="switchModel(this, 'LightGBM', 'multiclass')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
         <div class="menu-item" onclick="switchModel(this, 'DNN', 'multiclass')"><i class="fas fa-brain"></i> <span>DNN</span></div>
+
+        <div class="menu-section" style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border-color);">Configuration</div>
+        <div id="menu-settings" class="menu-item" onclick="switchView('settings')">
+            <i class="fas fa-cog"></i> <span>System Settings</span>
+        </div>
 
         <div class="user-profile">
             <img src="{{ url_for('static', filename='avatars/admin_default.png') }}" class="user-avatar" id="nav-avatar">

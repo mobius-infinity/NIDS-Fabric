@@ -1,4 +1,9 @@
 import os
+
+# Disable CUDA/GPU logging since GPU is not used
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU
+
 import glob
 import time
 import shutil
@@ -8,10 +13,16 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
+# Suppress TensorFlow warnings
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 # Import các biến Global
 from app.globals import (
     HISTORY_LOCK, CONFIG_LOCK, REALTIME_HISTORY, 
-    FILE_STATUS, FILE_SIZES, GLOBAL_THREAT_STATS, SYSTEM_CONFIG
+    FILE_STATUS, FILE_SIZES, GLOBAL_THREAT_STATS, SYSTEM_CONFIG,
+    PCAP_METADATA, PCAP_METADATA_LOCK
 )
 # Import ML Logic
 from app.core.pcap_utils import convert_pcap_to_csv, FEATURES_DNN_RF, LIGHTGBM_23_FEATURES
@@ -24,9 +35,20 @@ def update_model_log(app, model_name, task, df_results):
     try:
         log_path = os.path.join(app.config['LOGS_FOLDER'], f"{model_name.replace(' ', '_')}_{task}.csv")
         
+        # Xóa các cột trống/NaN trước concat để tránh FutureWarning
+        df_results = df_results.dropna(axis=1, how='all')
+        
         # Logic giống app4.py: Đọc cũ -> Nối mới -> Giữ 10000 dòng
         if os.path.exists(log_path):
-            combined = pd.concat([pd.read_csv(log_path, sep='#'), df_results], ignore_index=True)
+            df_old = pd.read_csv(log_path, sep='#')
+            # Align columns trước concat
+            for col in df_results.columns:
+                if col not in df_old.columns:
+                    df_old[col] = None
+            # Explicitly exclude NA columns to avoid FutureWarning
+            df_old_aligned = df_old[df_results.columns].dropna(axis=1, how='all')
+            df_results_clean = df_results.dropna(axis=1, how='all')
+            combined = pd.concat([df_old_aligned, df_results_clean], ignore_index=True)
         else:
             combined = df_results
             
@@ -38,6 +60,141 @@ def update_model_log(app, model_name, task, df_results):
         # print(f"[Log] Saved result to {log_path}") 
     except Exception as e: 
         print(f"[Log Error] Cannot write log: {e}")
+
+def update_consensus_log(app, df_raw, votes, final_decisions, threshold, mode, filename, timestamp):
+    """
+    Ghi log kết quả consensus/voting từ tất cả models.
+    File: Consensus_Voting.csv
+    """
+    try:
+        log_path = os.path.join(app.config['LOGS_FOLDER'], "Consensus_Voting.csv")
+        
+        # Tạo DataFrame với kết quả tổng hợp
+        df_consensus = df_raw.copy()
+        df_consensus['id'] = [uuid.uuid4().hex for _ in range(len(df_consensus))]
+        df_consensus['time_scaned'] = timestamp
+        df_consensus['file_scaned'] = filename
+        df_consensus['votes'] = votes
+        df_consensus['threshold'] = threshold
+        df_consensus['detection_mode'] = mode
+        
+        # Kết quả cuối cùng dựa trên voting
+        df_consensus['result'] = ['attack' if d == 1 else 'benign' for d in final_decisions]
+        df_consensus['confidence'] = [f"{v}/{6}" for v in votes]  # 6 models total
+        
+        # Chọn các cột quan trọng để lưu
+        important_cols = ['id', 'time_scaned', 'file_scaned', 'IPV4_SRC_ADDR', 'L4_SRC_PORT', 
+                         'IPV4_DST_ADDR', 'L4_DST_PORT', 'PROTOCOL', 'votes', 'threshold',
+                         'detection_mode', 'result', 'confidence']
+        
+        # Chỉ giữ các cột tồn tại
+        existing_cols = [c for c in important_cols if c in df_consensus.columns]
+        df_consensus = df_consensus[existing_cols].dropna(axis=1, how='all')
+        
+        # Đọc cũ -> Nối mới -> Giữ 10000 dòng
+        if os.path.exists(log_path):
+            df_old = pd.read_csv(log_path, sep='#')
+            for col in df_consensus.columns:
+                if col not in df_old.columns:
+                    df_old[col] = None
+            df_old_aligned = df_old[df_consensus.columns].dropna(axis=1, how='all')
+            df_consensus_clean = df_consensus.dropna(axis=1, how='all')
+            combined = pd.concat([df_old_aligned, df_consensus_clean], ignore_index=True)
+        else:
+            combined = df_consensus
+            
+        if 'time_scaned' in combined.columns: 
+            combined = combined.sort_values(by='time_scaned')
+            
+        combined.tail(10000).to_csv(log_path, index=False, sep='#')
+    except Exception as e: 
+        print(f"[Consensus Log Error] Cannot write log: {e}")
+
+def save_pcap_metadata(app, pcap_filename, pcap_size_mb, total_flows, threat_flows, safe_flows, is_threat, timestamp):
+    """
+    Lưu thông tin PCAP metadata vào CSV tại storage/info_pcaps/metadata_pcaps.csv
+    và cập nhật cache với flag 'exists'
+    """
+    try:
+        pcap_info_folder = app.config.get('PCAP_INFO_FOLDER', os.path.join(app.config['BASE_FOLDER'], 'storage', 'info_pcaps'))
+        evidence_folder = app.config.get('EVIDENCE_FOLDER', os.path.join(app.config['BASE_FOLDER'], 'storage', 'evidence_pcaps'))
+        incoming_folder = app.config.get('INCOMING_FOLDER', os.path.join(app.config['BASE_FOLDER'], 'storage', 'incoming_pcaps'))
+        processed_folder = app.config.get('PROCESSED_FOLDER', os.path.join(app.config['BASE_FOLDER'], 'storage', 'processed_pcaps'))
+        os.makedirs(pcap_info_folder, exist_ok=True)
+        pcap_metadata_path = os.path.join(pcap_info_folder, 'metadata_pcaps.csv')
+        
+        # Extract pcap_id from filename if format is {pcap_id}_{original_name}
+        pcap_id = None
+        if '_' in pcap_filename:
+            parts = pcap_filename.split('_', 1)
+            if len(parts[0]) == 32:  # UUID hex is 32 chars
+                try:
+                    int(parts[0], 16)  # Validate it's hex
+                    pcap_id = parts[0]
+                except:
+                    pass
+        
+        # Generate new ID if not found in filename
+        if not pcap_id:
+            pcap_id = uuid.uuid4().hex
+        
+        # Check if file exists - check multiple folders
+        file_exists = False
+        if is_threat:
+            # For threat files, check in evidence_folder first
+            pcap_path = os.path.join(evidence_folder, pcap_filename)
+            file_exists = os.path.exists(pcap_path)
+            # If not found in evidence_folder, check incoming_folder (file might not be moved yet)
+            if not file_exists:
+                pcap_path = os.path.join(incoming_folder, pcap_filename)
+                file_exists = os.path.exists(pcap_path)
+        else:
+            # Safe files are deleted, so always False
+            file_exists = False
+        
+        new_record = pd.DataFrame({
+            'pcap_id': [pcap_id],
+            'pcap_name': [pcap_filename],
+            'size_mb': [pcap_size_mb],
+            'total_flows': [total_flows],
+            'threat_flows': [threat_flows],
+            'safe_flows': [safe_flows],
+            'is_threat': [is_threat],
+            'analysis_date': [timestamp],
+            'exists': [file_exists]
+        })
+        
+        if os.path.exists(pcap_metadata_path):
+            df_old = pd.read_csv(pcap_metadata_path, sep='#')
+            # Ensure old records have 'exists' column (for backward compatibility)
+            if 'exists' not in df_old.columns:
+                # For old records, check file existence
+                for idx, row in df_old.iterrows():
+                    is_threat_old = bool(row.get('is_threat', False))
+                    pcap_name = row.get('pcap_name', '')
+                    file_exists_old = False
+                    if is_threat_old and pcap_name:
+                        pcap_path = os.path.join(evidence_folder, pcap_name)
+                        file_exists_old = os.path.exists(pcap_path)
+                    df_old.loc[idx, 'exists'] = file_exists_old
+            combined = pd.concat([df_old, new_record], ignore_index=True)
+        else:
+            combined = new_record
+        
+        # Giữ lại 5000 records gần nhất
+        combined.tail(5000).to_csv(pcap_metadata_path, index=False, sep='#')
+        
+        # Cập nhật cache PCAP_METADATA với metadata mới (thêm flag exists)
+        metadata_dict = new_record.iloc[0].to_dict()
+        metadata_dict['exists'] = file_exists
+        with PCAP_METADATA_LOCK:
+            # Use pcap_id as key to avoid conflicts with duplicate filenames
+            PCAP_METADATA[pcap_id] = metadata_dict
+        
+        return pcap_id
+    except Exception as e:
+        print(f"[PCAP Metadata Error] Cannot save metadata: {e}")
+        return uuid.uuid4().hex
 
 def thread_system_stats():
     """Giống hệt app4.py"""
@@ -128,13 +285,15 @@ def thread_pcap_worker(app):
 
                             # 2. Logic Dự đoán & Voting (Giống hệt app4.py)
                             final_decisions = np.zeros(len(df_raw))
+                            votes = np.zeros(len(df_raw), dtype=int)  # Initialize votes for consensus log
                             
                             if current_mode == 'rf_only':
                                 model, scaler, _, _ = model_cache.get_model('Random Forest', 'binary')
                                 if model: 
                                     final_decisions = get_binary_prediction_vector(df_raw, model, scaler, 'rf', FEATURES_DNN_RF)
+                                    votes = final_decisions.astype(int)  # RF only = 0 or 1 vote
                             else:
-                                votes = np.zeros(len(df_raw), dtype=int)
+                                # Voting mode: Use all 6 models (3 binary + 3 multiclass)
                                 for name, mtype, task, feats in MODELS_CONFIG_LIST:
                                     model, scaler, _, _ = model_cache.get_model(name, task)
                                     if model:
@@ -154,7 +313,10 @@ def thread_pcap_worker(app):
                             is_threat = n_threats > 0
                             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             
-                            # 4. Ghi Log chi tiết (SỬA: Gọi hàm update_model_log với biến app)
+                            # 4. Ghi Consensus Log (kết quả tổng hợp từ voting)
+                            update_consensus_log(app, df_raw, votes, final_decisions, current_thresh, current_mode, fname, ts)
+                            
+                            # 5. Ghi Log chi tiết cho từng model
                             for name, mtype, task, feats in MODELS_CONFIG_LIST:
                                 model, scaler, encoder, _ = model_cache.get_model(name, task)
                                 if model:
@@ -167,13 +329,23 @@ def thread_pcap_worker(app):
                                     # GHI LOG TẠI ĐÂY
                                     update_model_log(app, name, task, df_log)
 
-                            # 5. Di chuyển file (SỬA: Thêm kiểm tra tồn tại để tránh lỗi File Missing)
-                            dest_folder = app.config['EVIDENCE_FOLDER'] if is_threat else os.path.join(app.config['PROCESSED_FOLDER'], 'benign')
-                            os.makedirs(dest_folder, exist_ok=True)
+                            # 5. Lưu metadata PCAP vào CSV
+                            pcap_size_mb = FILE_SIZES.get(fname, 0)
+                            pcap_id = save_pcap_metadata(app, fname, pcap_size_mb, 
+                                                        int(len(df_raw)), int(n_threats), 
+                                                        int(n_safe), is_threat, ts)
                             
+                            # 6. Di chuyển file (Chỉ lưu PCAP nếu có threat, nếu không thì xóa)
                             if os.path.exists(pcap):
-                                shutil.move(pcap, os.path.join(dest_folder, fname))
-                                FILE_STATUS[fname] = 'Done (Threat Found)' if is_threat else 'Done (Safe)'
+                                if is_threat:
+                                    # Lưu PCAP vào evidence folder nếu có threat
+                                    os.makedirs(app.config['EVIDENCE_FOLDER'], exist_ok=True)
+                                    shutil.move(pcap, os.path.join(app.config['EVIDENCE_FOLDER'], fname))
+                                    FILE_STATUS[fname] = 'Done (Threat Found)'
+                                else:
+                                    # Xóa PCAP nếu an toàn (chỉ lưu metadata)
+                                    os.remove(pcap)
+                                    FILE_STATUS[fname] = 'Done (Safe)'
                             else:
                                 # Nếu file đã bị thread khác move rồi thì coi như xong
                                 if 'Done' not in FILE_STATUS.get(fname, ''):

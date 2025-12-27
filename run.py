@@ -2,7 +2,7 @@ import os
 import threading
 from app import create_app, db
 from app.models import User, SystemSettings
-from app.globals import SYSTEM_CONFIG
+from app.globals import SYSTEM_CONFIG, load_pcap_metadata_from_csv, load_ips_rules_from_csv
 from app.core.worker import thread_system_stats, thread_pcap_worker
 from werkzeug.security import generate_password_hash
 
@@ -37,6 +37,11 @@ def init_db_data(app):
             new_setting = SystemSettings(detection_mode='voting', voting_threshold=2)
             db.session.add(new_setting)
             db.session.commit()
+        
+        # Load PCAP Metadata and IPS Rules from CSV into memory
+        print("[System] Loading PCAP metadata and IPS rules...")
+        load_pcap_metadata_from_csv(app)
+        load_ips_rules_from_csv(app)
 
 def create_folders(app):
     folders = [
@@ -46,6 +51,8 @@ def create_folders(app):
         app.config['PROCESSED_FOLDER'],
         os.path.join(app.config['PROCESSED_FOLDER'], 'benign'),
         app.config['LOGS_FOLDER'],
+        app.config['PCAP_INFO_FOLDER'],
+        app.config['IPS_FOLDER'],
         app.config['AVATAR_FOLDER']
     ]
     for f in folders:

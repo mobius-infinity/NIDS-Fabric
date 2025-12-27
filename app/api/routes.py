@@ -13,10 +13,21 @@ from app.models import User, SystemSettings
 # Import các biến toàn cục (Global States)
 from app.globals import (
     HISTORY_LOCK, REALTIME_HISTORY, GLOBAL_THREAT_STATS,
-    SYSTEM_CONFIG, CONFIG_LOCK, FILE_STATUS, FILE_SIZES
+    SYSTEM_CONFIG, CONFIG_LOCK, FILE_STATUS, FILE_SIZES,
+    PCAP_METADATA, PCAP_METADATA_LOCK
 )
 
+# Import IPS Manager
+from app.core.ips_manager import ips_manager
+
 api_bp = Blueprint('api', __name__)
+
+# --- WELL-KNOWN ENDPOINTS ---
+
+@api_bp.route('/.well-known/appspecific/com.chrome.devtools.json')
+def chrome_devtools():
+    """Suppress Chrome DevTools metadata request"""
+    return jsonify({}), 200
 
 # --- USER & SETTINGS API ---
 
@@ -132,24 +143,120 @@ def general_dashboard_stats():
         "security": sec_stats 
     })
 
+@api_bp.route('/pcap-details/<pcap_id>')
+@login_required
+def get_pcap_details(pcap_id):
+    """Get detailed information about a PCAP file using pcap_id or filename (fallback)"""
+    evidence_folder = current_app.config['EVIDENCE_FOLDER']
+    
+    try:
+        pcap_info = None
+        
+        # Try to get from cache using pcap_id first (fast - in-memory)
+        with PCAP_METADATA_LOCK:
+            if pcap_id in PCAP_METADATA:
+                pcap_info = PCAP_METADATA[pcap_id].copy()
+        
+        # If not found, check if pcap_id is actually a filename - search by filename in cache
+        if pcap_info is None:
+            with PCAP_METADATA_LOCK:
+                for pid, metadata in PCAP_METADATA.items():
+                    if metadata.get('pcap_name') == pcap_id:
+                        pcap_info = metadata.copy()
+                        break
+        
+        # Fallback to CSV if not in cache
+        if pcap_info is None:
+            pcap_info_folder = current_app.config.get('PCAP_INFO_FOLDER', os.path.join(current_app.config['BASE_FOLDER'], 'storage', 'info_pcaps'))
+            pcap_metadata_path = os.path.join(pcap_info_folder, 'metadata_pcaps.csv')
+            
+            if not os.path.exists(pcap_metadata_path):
+                return jsonify({"error": "No PCAP metadata found"}), 404
+            
+            df_metadata = pd.read_csv(pcap_metadata_path, sep='#')
+            
+            # Try to find by pcap_id first
+            record = df_metadata[df_metadata['pcap_id'] == pcap_id]
+            
+            # If not found, try to find by pcap_name (filename)
+            if record.empty:
+                record = df_metadata[df_metadata['pcap_name'] == pcap_id]
+            
+            if record.empty:
+                return jsonify({"error": "PCAP not found in metadata"}), 404
+            
+            pcap_info = record.iloc[0].to_dict()
+        
+        is_threat = bool(pcap_info.get('is_threat', False))
+        pcap_filename = pcap_info.get('pcap_name', '')
+        
+        # Check if file exists from cache metadata (already checked on startup)
+        # If 'exists' column missing (backward compatibility), check file directly
+        if 'exists' in pcap_info:
+            pcap_file_exists = pcap_info.get('exists', False)
+        else:
+            # Fallback: check file existence directly
+            pcap_file_exists = False
+            if is_threat and pcap_filename:
+                pcap_path = os.path.join(evidence_folder, pcap_filename)
+                pcap_file_exists = os.path.exists(pcap_path)
+        
+        return jsonify({
+            "pcap_id": pcap_info.get('pcap_id', ''),
+            "name": pcap_info.get('pcap_name'),
+            "size_mb": pcap_info.get('size_mb', 0),
+            "size_bytes": int(pcap_info.get('size_mb', 0) * 1024 * 1024),
+            "upload_date": pcap_info.get('analysis_date', 'N/A'),
+            "status": 'Done (Threat Found)' if is_threat else 'Done (Safe)',
+            "total_flows": int(pcap_info.get('total_flows', 0)),
+            "threat_flows": int(pcap_info.get('threat_flows', 0)),
+            "safe_flows": int(pcap_info.get('safe_flows', 0)),
+            "is_threat": is_threat,
+            "pcap_exists": pcap_file_exists
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @api_bp.route('/incoming-files')
 @login_required
 def get_incoming_files():
     filename = request.args.get('file')
     incoming_folder = current_app.config['INCOMING_FOLDER']
     
-    # If specific file requested, return details
+    # If specific file requested by pcap_id, return details
     if filename:
-        filepath = os.path.join(incoming_folder, secure_filename(filename))
+        # Try to get from cache using pcap_id
+        with PCAP_METADATA_LOCK:
+            if filename in PCAP_METADATA:
+                pcap_info = PCAP_METADATA[filename]
+                return jsonify({
+                    "status": "success",
+                    "file": {
+                        "pcap_id": pcap_info.get('pcap_id', ''),
+                        "name": pcap_info.get('pcap_name'),
+                        "size_mb": pcap_info.get('size_mb', 0),
+                        "size_bytes": int(pcap_info.get('size_mb', 0) * 1024 * 1024),
+                        "status": FILE_STATUS.get(pcap_info.get('pcap_name', ''), 'Done'),
+                        "upload_date": pcap_info.get('analysis_date', 'N/A'),
+                        "total_flows": int(pcap_info.get('total_flows', 0)),
+                        "threat_flows": int(pcap_info.get('threat_flows', 0)),
+                        "safe_flows": int(pcap_info.get('safe_flows', 0))
+                    }
+                })
+        
+        # Fallback to filesystem for pending files
+        safe_filename = secure_filename(filename)
+        filepath = os.path.join(incoming_folder, safe_filename)
         if os.path.exists(filepath):
             try:
                 return jsonify({
                     "status": "success",
                     "file": {
-                        "name": filename,
+                        "pcap_id": "pending",
+                        "name": safe_filename,
                         "size_mb": round(os.path.getsize(filepath)/(1024*1024), 2),
                         "size_bytes": os.path.getsize(filepath),
-                        "status": FILE_STATUS.get(filename, 'Pending'),
+                        "status": FILE_STATUS.get(safe_filename, 'Pending'),
                         "upload_date": datetime.fromtimestamp(os.path.getctime(filepath)).strftime('%Y-%m-%d %H:%M:%S'),
                         "total_flows": 0,
                         "threat_flows": 0,
@@ -159,49 +266,172 @@ def get_incoming_files():
             except Exception as e:
                 return jsonify({"status": "error", "message": str(e)}), 500
         else:
-            # Try to get from FILE_STATUS if file was processed
-            if filename in FILE_STATUS:
-                return jsonify({
-                    "status": "success",
-                    "file": {
-                        "name": filename,
-                        "size_mb": FILE_SIZES.get(filename, 0),
-                        "size_bytes": FILE_SIZES.get(filename, 0) * 1024 * 1024,
-                        "status": FILE_STATUS.get(filename, 'Unknown'),
-                        "upload_date": "N/A",
-                        "total_flows": 0,
-                        "threat_flows": 0,
-                        "safe_flows": 0
-                    }
-                })
             return jsonify({"status": "error", "message": "File not found"}), 404
     
-    # Otherwise return list of all files
+    # Get filter/search/sort parameters
+    search = request.args.get('search', '').strip().lower()
+    filter_name = request.args.get('filter_name', '').strip().lower()
+    filter_status = request.args.get('filter_status', '').strip().lower()
+    filter_threat = request.args.get('filter_threat', '').strip().lower()  # 'threat', 'safe', or empty
+    sort_by = request.args.get('sort_by', 'upload_date').strip().lower()  # name, size, status, upload_date, flows
+    sort_order = request.args.get('sort_order', 'desc').strip().lower()  # asc or desc
+    offset = int(request.args.get('offset', 0))
+    limit = int(request.args.get('limit', 100))
+    
+    # Debug logging
+    if search or filter_name or filter_status or filter_threat:
+        print(f"[PCAP Filter] search='{search}', name='{filter_name}', status='{filter_status}', threat='{filter_threat}'", flush=True)
+    
+    # Otherwise return list of all files (combining incoming folder + cache)
     files = []
+    
+    # Add files from incoming folder
     if os.path.exists(incoming_folder):
         for f in glob.glob(os.path.join(incoming_folder, "*.pcap*")):
             bn = os.path.basename(f)
-            # Cập nhật size nếu chưa có hoặc cập nhật mới
             sz = FILE_SIZES.get(bn, round(os.path.getsize(f)/(1024*1024), 2))
             FILE_SIZES[bn] = sz
             files.append({
+                "pcap_id": "pending",  # New files don't have ID yet
                 "name": bn, 
                 "size_mb": sz, 
                 "status": FILE_STATUS.get(bn, 'Pending'),
-                "upload_date": datetime.fromtimestamp(os.path.getctime(f)).strftime('%Y-%m-%d %H:%M:%S')
+                "upload_date": datetime.fromtimestamp(os.path.getctime(f)).strftime('%Y-%m-%d %H:%M:%S'),
+                "total_flows": 0,
+                "threat_flows": 0,
+                "safe_flows": 0,
+                "is_threat": False
             })
-            
-    # Thêm các file đang xử lý nhưng đã bị move khỏi folder incoming (để hiển thị trạng thái Done/Error)
+    
+    # Add processed files from cache (Done/Error status)
+    with PCAP_METADATA_LOCK:
+        for pcap_id, metadata in PCAP_METADATA.items():
+            # Don't add if already in list from incoming folder (check by pcap_id for uniqueness)
+            if not any(x['pcap_id'] == pcap_id for x in files):
+                files.append({
+                    "pcap_id": pcap_id,
+                    "name": metadata.get('pcap_name', ''),
+                    "size_mb": metadata.get('size_mb', 0),
+                    "status": FILE_STATUS.get(metadata.get('pcap_name', ''), 'Done'),
+                    "upload_date": metadata.get('analysis_date', 'N/A'),
+                    "total_flows": int(metadata.get('total_flows', 0)),
+                    "threat_flows": int(metadata.get('threat_flows', 0)),
+                    "safe_flows": int(metadata.get('safe_flows', 0)),
+                    "is_threat": bool(metadata.get('is_threat', False))
+                })
+    
+    # Add files from FILE_STATUS that were processed but moved
     for f_name, status in FILE_STATUS.items():
         if ('Done' in status or 'Error' in status) and not any(x['name'] == f_name for x in files):
             files.append({
+                "pcap_id": "",  
                 "name": f_name, 
                 "size_mb": FILE_SIZES.get(f_name, 0), 
                 "status": status,
-                "upload_date": "N/A"
+                "upload_date": "N/A",
+                "total_flows": 0,
+                "threat_flows": 0,
+                "safe_flows": 0,
+                "is_threat": False
             })
-            
-    return jsonify({"files": sorted(files, key=lambda x: x['name'])})
+    
+    # Apply filters
+    filtered_files = []
+    for f in files:
+        # Global search
+        if search:
+            if search not in f['name'].lower() and search not in f['status'].lower():
+                continue
+        
+        # Filter by name
+        if filter_name and filter_name not in f['name'].lower():
+            continue
+        
+        # Filter by status
+        if filter_status:
+            status_match = filter_status in f['status'].lower()
+            if not status_match:
+                continue
+        
+        # Filter by threat level
+        if filter_threat:
+            if filter_threat == 'threat' and not f['is_threat']:
+                continue
+            elif filter_threat == 'safe' and f['is_threat']:
+                continue
+        
+        filtered_files.append(f)
+    
+    # Debug log after filtering
+    if search or filter_name or filter_status or filter_threat:
+        print(f"[PCAP Filter] Before: {len(files)} files, After: {len(filtered_files)} files", flush=True)
+    
+    # Apply sorting
+    sort_key_map = {
+        'name': lambda x: x['name'].lower(),
+        'size': lambda x: x['size_mb'],
+        'status': lambda x: x['status'].lower(),
+        'upload_date': lambda x: x['upload_date'],
+        'flows': lambda x: x['total_flows']
+    }
+    
+    sort_func = sort_key_map.get(sort_by, sort_key_map['upload_date'])
+    filtered_files.sort(key=sort_func, reverse=(sort_order == 'desc'))
+    
+    # Pagination
+    total = len(filtered_files)
+    paginated_files = filtered_files[offset:offset+limit]
+    
+    return jsonify({
+        "files": paginated_files,
+        "total": total,
+        "offset": offset,
+        "limit": limit
+    })
+
+
+@api_bp.route('/delete-pcap/<pcap_id>', methods=['DELETE'])
+@login_required
+def delete_pcap(pcap_id):
+    """Delete PCAP file from cache and CSV metadata"""
+    try:
+        pcap_info_folder = current_app.config.get('PCAP_INFO_FOLDER', os.path.join(current_app.config['BASE_FOLDER'], 'storage', 'info_pcaps'))
+        evidence_folder = current_app.config['EVIDENCE_FOLDER']
+        pcap_metadata_path = os.path.join(pcap_info_folder, 'metadata_pcaps.csv')
+        
+        # Get info from cache
+        pcap_info = None
+        with PCAP_METADATA_LOCK:
+            if pcap_id in PCAP_METADATA:
+                pcap_info = PCAP_METADATA[pcap_id].copy()
+                del PCAP_METADATA[pcap_id]
+        
+        if pcap_info is None:
+            return jsonify({"status": "error", "message": "PCAP not found"}), 404
+        
+        pcap_filename = pcap_info.get('pcap_name', '')
+        
+        # Delete physical file if it exists (threat files)
+        if pcap_info.get('is_threat', False) and pcap_filename:
+            pcap_path = os.path.join(evidence_folder, pcap_filename)
+            if os.path.exists(pcap_path):
+                os.remove(pcap_path)
+        
+        # Update CSV - remove the record
+        if os.path.exists(pcap_metadata_path):
+            try:
+                df = pd.read_csv(pcap_metadata_path, sep='#')
+                df = df[df['pcap_id'] != pcap_id]
+                df.to_csv(pcap_metadata_path, index=False, sep='#')
+            except Exception as e:
+                print(f"[Error] Failed to update CSV: {e}")
+        
+        return jsonify({
+            "status": "success",
+            "message": f"PCAP {pcap_filename} deleted successfully"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @api_bp.route('/clear_logs', methods=['POST'])
@@ -350,14 +580,21 @@ def upload_pcap():
             return jsonify({"status": "error", "message": "Empty filename"}), 400
 
         incoming_folder = current_app.config['INCOMING_FOLDER']
-        filename = secure_filename(file.filename)
+        original_filename = secure_filename(file.filename)
+        
+        # Generate unique pcap_id for new uploads
+        import uuid
+        pcap_id = uuid.uuid4().hex
+        
+        # Rename file with pcap_id: {pcap_id}_{original_filename}
+        base, ext = os.path.splitext(original_filename)
+        filename = f"{pcap_id}_{original_filename}"
 
         # Avoid overwrite: if exists, append counter
         dest_path = os.path.join(incoming_folder, filename)
-        base, ext = os.path.splitext(filename)
         counter = 1
         while os.path.exists(dest_path):
-            filename = f"{base}_{counter}{ext}"
+            filename = f"{pcap_id}_{base}_{counter}{ext}"
             dest_path = os.path.join(incoming_folder, filename)
             counter += 1
 
@@ -368,7 +605,7 @@ def upload_pcap():
         FILE_STATUS[filename] = 'Pending'
         FILE_SIZES[filename] = round(os.path.getsize(dest_path)/(1024*1024), 2)
 
-        return jsonify({"status": "success", "name": filename})
+        return jsonify({"status": "success", "name": filename, "pcap_id": pcap_id})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -589,6 +826,200 @@ def get_flows():
     except Exception as e: 
         return jsonify({"error": str(e)})
 
+
+@api_bp.route('/get_consensus_logs')
+@login_required
+def get_consensus_logs():
+    """
+    API để lấy kết quả tổng hợp từ voting/consensus của tất cả models.
+    File: Consensus_Voting.csv
+    """
+    logs_folder = current_app.config['LOGS_FOLDER']
+    offset = int(request.args.get('offset', 0))
+    limit = int(request.args.get('limit', 50))
+    
+    # Get filter parameters
+    search = request.args.get('search', '').strip().lower()
+    filter_time = request.args.get('filter_time', '').strip().lower()
+    filter_file = request.args.get('filter_file', '').strip().lower()
+    filter_srcip = request.args.get('filter_srcip', '').strip().lower()
+    filter_srcport = request.args.get('filter_srcport', '').strip().lower()
+    filter_dstip = request.args.get('filter_dstip', '').strip().lower()
+    filter_dstport = request.args.get('filter_dstport', '').strip().lower()
+    filter_result = request.args.get('filter_result', '').strip().lower()
+    filter_votes = request.args.get('filter_votes', '').strip()
+    
+    # Get sort parameters
+    sort_by = request.args.get('sort_by', 'time').strip().lower()
+    sort_order = request.args.get('sort_order', 'desc').strip().lower()
+    
+    path = os.path.join(logs_folder, "Consensus_Voting.csv")
+    
+    if not os.path.exists(path): 
+        return jsonify({"flows": [], "total": 0})
+    
+    try:
+        df = pd.read_csv(path, sep='#')
+        df.columns = [str(c).replace('%', '').strip() for c in df.columns]
+        
+        # Apply filters
+        if search:
+            mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False, na=False).any(), axis=1)
+            df = df[mask]
+        
+        if filter_time and 'time_scaned' in df.columns:
+            df = df[df['time_scaned'].astype(str).str.contains(filter_time, case=False, na=False)]
+        
+        if filter_file and 'file_scaned' in df.columns:
+            df = df[df['file_scaned'].astype(str).str.contains(filter_file, case=False, na=False)]
+        
+        if filter_srcip and 'IPV4_SRC_ADDR' in df.columns:
+            df = df[df['IPV4_SRC_ADDR'].astype(str).str.contains(filter_srcip, case=False, na=False)]
+        
+        if filter_srcport and 'L4_SRC_PORT' in df.columns:
+            df = df[df['L4_SRC_PORT'].astype(str).str.contains(filter_srcport, case=False, na=False)]
+        
+        if filter_dstip and 'IPV4_DST_ADDR' in df.columns:
+            df = df[df['IPV4_DST_ADDR'].astype(str).str.contains(filter_dstip, case=False, na=False)]
+        
+        if filter_dstport and 'L4_DST_PORT' in df.columns:
+            df = df[df['L4_DST_PORT'].astype(str).str.contains(filter_dstport, case=False, na=False)]
+        
+        if filter_result and 'result' in df.columns:
+            df = df[df['result'].astype(str).str.contains(filter_result, case=False, na=False)]
+        
+        if filter_votes and 'votes' in df.columns:
+            try:
+                min_votes = int(filter_votes)
+                df = df[pd.to_numeric(df['votes'], errors='coerce') >= min_votes]
+            except:
+                pass
+        
+        # Sort
+        sort_column_map = {
+            'time': 'time_scaned',
+            'file': 'file_scaned',
+            'srcip': 'IPV4_SRC_ADDR',
+            'srcport': 'L4_SRC_PORT',
+            'dstip': 'IPV4_DST_ADDR',
+            'dstport': 'L4_DST_PORT',
+            'result': 'result',
+            'votes': 'votes',
+            'confidence': 'confidence'
+        }
+        
+        sort_col = sort_column_map.get(sort_by, 'time_scaned')
+        if sort_col not in df.columns:
+            sort_col = 'time_scaned'
+        
+        ascending = (sort_order == 'asc')
+        
+        if sort_col == 'votes':
+            try:
+                df['votes'] = pd.to_numeric(df['votes'], errors='coerce')
+                df = df.sort_values(by=sort_col, ascending=ascending, na_position='last')
+            except:
+                df = df.sort_values(by=sort_col, ascending=ascending)
+        else:
+            df = df.sort_values(by=sort_col, ascending=ascending)
+
+        total = len(df)
+        flows = df.iloc[offset:offset+limit].fillna('').to_dict('records')
+        
+        for i, rec in enumerate(flows):
+            rec['seq'] = int(offset + i + 1)
+        
+        return jsonify({
+            "flows": flows,
+            "total": total,
+            "offset": offset,
+            "limit": limit
+        })
+    except Exception as e: 
+        return jsonify({"error": str(e)})
+
+
+@api_bp.route('/clear_consensus_logs', methods=['POST'])
+@login_required
+def clear_consensus_logs():
+    """Clear consensus/voting logs"""
+    try:
+        logs_folder = current_app.config['LOGS_FOLDER']
+        path = os.path.join(logs_folder, "Consensus_Voting.csv")
+        
+        if not os.path.exists(path):
+            return jsonify({"status": "error", "message": "Log file not found"}), 404
+        
+        df = pd.read_csv(path, sep='#')
+        total_deleted = len(df)
+        
+        # Clear file but keep header
+        df.columns = [str(c).replace('%', '').strip() for c in df.columns]
+        df_empty = pd.DataFrame(columns=df.columns)
+        df_empty.to_csv(path, index=False, sep='#')
+        
+        return jsonify({
+            "status": "success",
+            "deleted": total_deleted
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@api_bp.route('/consensus-details/<flow_id>')
+@login_required
+def get_consensus_details(flow_id):
+    """Get detailed information about a specific consensus voting log entry"""
+    try:
+        logs_folder = current_app.config['LOGS_FOLDER']
+        path = os.path.join(logs_folder, "Consensus_Voting.csv")
+        
+        if not os.path.exists(path):
+            return jsonify({"error": "Consensus log file not found"}), 404
+        
+        df = pd.read_csv(path, sep='#')
+        df.columns = [str(c).replace('%', '').strip() for c in df.columns]
+        
+        # Find the record by ID
+        rec = df[df['id'].astype(str).str.strip() == str(flow_id).strip()]
+        
+        if rec.empty:
+            return jsonify({"error": "Flow not found"}), 404
+        
+        return jsonify(rec.iloc[0].replace({np.nan: None}).to_dict())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/top-flows')
+@login_required
+def get_top_flows():
+    """Get top 5 flows by traffic (IN_BYTES + OUT_BYTES)"""
+    model = request.args.get('model', 'Random Forest')
+    task = request.args.get('task', 'binary')
+    logs_folder = current_app.config['LOGS_FOLDER']
+    
+    path = os.path.join(logs_folder, f"{model.replace(' ', '_')}_{task}.csv")
+    
+    if not os.path.exists(path):
+        return jsonify({"flows": []})
+    
+    try:
+        df = pd.read_csv(path, sep='#')
+        df.columns = [str(c).replace('%', '').strip() for c in df.columns]
+        
+        # Calculate total traffic
+        df['IN_BYTES'] = pd.to_numeric(df['IN_BYTES'], errors='coerce').fillna(0)
+        df['OUT_BYTES'] = pd.to_numeric(df['OUT_BYTES'], errors='coerce').fillna(0)
+        df['total_traffic'] = df['IN_BYTES'] + df['OUT_BYTES']
+        
+        # Get top 5 by traffic
+        top5 = df.nlargest(5, 'total_traffic')[['IPV4_SRC_ADDR', 'L4_SRC_PORT', 'IPV4_DST_ADDR', 'L4_DST_PORT', 'PROTOCOL', 'IN_BYTES', 'OUT_BYTES', 'total_traffic']].fillna('')
+        
+        return jsonify({"flows": top5.to_dict('records')})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 @api_bp.route('/flow-details/<flow_id>')
 @login_required
 def get_details(flow_id):
@@ -648,11 +1079,185 @@ def download_file():
             return jsonify({"status": "error", "message": "No filename provided"}), 400
         
         incoming_folder = current_app.config['INCOMING_FOLDER']
-        filepath = os.path.join(incoming_folder, secure_filename(filename))
+        evidence_folder = current_app.config['EVIDENCE_FOLDER']
         
+        # Secure the filename
+        safe_filename = secure_filename(filename)
+        
+        # Try incoming folder first (pending files)
+        filepath = os.path.join(incoming_folder, safe_filename)
         if os.path.exists(filepath):
             return send_file(filepath, as_attachment=True, download_name=filename)
-        else:
-            return jsonify({"status": "error", "message": "File not found"}), 404
+        
+        # Try evidence folder (threat files)
+        filepath = os.path.join(evidence_folder, safe_filename)
+        if os.path.exists(filepath):
+            return send_file(filepath, as_attachment=True, download_name=filename)
+        
+        # File not found in either location
+        return jsonify({"status": "error", "message": "File not found"}), 404
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# --- IPS/IDS RULES API ---
+
+@api_bp.route('/ips-rules')
+@login_required
+def get_ips_rules():
+    """Get IPS rules with pagination"""
+    try:
+        # Initialize IPS manager với app context
+        ips_manager.init_app(current_app)
+        
+        offset = request.args.get('offset', 0, type=int)
+        limit = request.args.get('limit', 20, type=int)
+        
+        rules = ips_manager.get_all_rules(limit=limit, offset=offset)
+        stats = ips_manager.get_statistics()
+        
+        return jsonify({
+            "rules": rules,
+            "total_rules": stats.get('total_rules', 0),
+            "statistics": stats
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-rules/<rule_id>')
+@login_required
+def get_ips_rule_details(rule_id):
+    """Get detailed information about a specific IPS rule"""
+    try:
+        ips_manager.init_app(current_app)
+        rule = ips_manager.get_rule_by_id(rule_id)
+        
+        if not rule:
+            return jsonify({"error": "Rule not found"}), 404
+        
+        return jsonify(rule)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-rules/search', methods=['POST'])
+@login_required
+def search_ips_rules():
+    """Search IPS rules by keyword"""
+    try:
+        ips_manager.init_app(current_app)
+        keyword = request.json.get('keyword', '')
+        
+        rules = ips_manager.search_rules(keyword)
+        
+        return jsonify({
+            "rules": rules,
+            "count": len(rules)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-statistics')
+@login_required
+def get_ips_statistics():
+    """Get IPS rules statistics"""
+    try:
+        ips_manager.init_app(current_app)
+        stats = ips_manager.get_statistics()
+        
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-rules/severity/<severity>')
+@login_required
+def get_ips_rules_by_severity(severity):
+    """Get IPS rules filtered by severity"""
+    try:
+        ips_manager.init_app(current_app)
+        rules = ips_manager.get_rules_by_severity(severity)
+        
+        return jsonify({
+            "rules": rules,
+            "severity": severity,
+            "count": len(rules)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-rules/category/<category>')
+@login_required
+def get_ips_rules_by_category(category):
+    """Get IPS rules filtered by category"""
+    try:
+        ips_manager.init_app(current_app)
+        rules = ips_manager.get_rules_by_category(category)
+        
+        return jsonify({
+            "rules": rules,
+            "category": category,
+            "count": len(rules)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-rules/import-file', methods=['POST'])
+@login_required
+def import_ips_rules_from_file():
+    """Import IPS rules from uploaded CSV file"""
+    try:
+        ips_manager.init_app(current_app)
+        
+        if 'file' not in request.files:
+            return jsonify({"success": False, "message": "No file provided"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"success": False, "message": "Empty filename"}), 400
+        
+        if not file.filename.endswith('.csv'):
+            return jsonify({"success": False, "message": "Only CSV files are supported"}), 400
+        
+        # Import từ file
+        result = ips_manager.import_rules_from_file(file.stream)
+        
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@api_bp.route('/ips-rules/import-url', methods=['POST'])
+@login_required
+def import_ips_rules_from_url():
+    """Import IPS rules from URL"""
+    try:
+        ips_manager.init_app(current_app)
+        
+        data = request.json
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({"success": False, "message": "URL not provided"}), 400
+        
+        # Validate URL
+        if not url.startswith('http://') and not url.startswith('https://'):
+            return jsonify({"success": False, "message": "Invalid URL (must start with http:// or https://)"}), 400
+        
+        # Import từ URL
+        result = ips_manager.import_rules_from_url(url)
+        
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@api_bp.route('/ips-rules/<rule_id>', methods=['DELETE'])
+@login_required
+def delete_ips_rule(rule_id):
+    """Delete an IPS rule"""
+    try:
+        ips_manager.init_app(current_app)
+        success = ips_manager.delete_rule(rule_id)
+        
+        if success:
+            return jsonify({"success": True, "message": "Rule deleted successfully"}), 200
+        else:
+            return jsonify({"success": False, "message": "Rule not found"}), 404
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500

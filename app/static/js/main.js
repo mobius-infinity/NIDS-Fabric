@@ -25,9 +25,27 @@ let columnFilters = {
 let sortBy = 'time';
 let sortOrder = 'desc'; // 'asc' or 'desc'
 
+// PCAP Filter State
+let pcapCurrentPage = 1;
+let pcapPageSize = 100;
+let pcapTotalFiles = 0;
+let pcapSortBy = 'upload_date';
+let pcapSortOrder = 'desc';
+
+// PCAP Filter Values (persisted)
+let pcapFilterState = {
+    search: '',
+    filterName: '',
+    filterStatus: '',
+    filterThreat: ''
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     // Init dark mode from localStorage
     initDarkMode();
+    
+    // Initialize detection mode dropdown
+    initDetectionModeDropdown();
     
     // Chỉ init charts nếu element tồn tại (tránh lỗi ở trang login)
     if(document.getElementById('sysChart')) {
@@ -60,7 +78,12 @@ async function loadUserInfo() {
         if(document.getElementById('setting-fullname')) {
             document.getElementById('setting-fullname').value = data.full_name;
             document.getElementById('setting-avatar').src = '/static/avatars/' + data.avatar;
-            document.getElementById('modeSwitch').checked = (data.config_mode === 'rf_only');
+            
+            // Update detection mode dropdown
+            const modeSelector = document.getElementById('modeSelector');
+            if (modeSelector) {
+                modeSelector.value = data.config_mode || 'voting';
+            }
             
             // Set theme radio buttons
             const theme = data.theme || 'light';
@@ -176,7 +199,8 @@ async function updateProfile() {
 }
 
 async function saveSystemSettings() {
-    const mode = document.getElementById('modeSwitch').checked ? 'rf_only' : 'voting';
+    const modeSelector = document.getElementById('modeSelector');
+    const mode = modeSelector ? modeSelector.value : 'voting';
     const thresh = document.getElementById('threshSlider').value;
     
     try {
@@ -190,6 +214,34 @@ async function saveSystemSettings() {
         });
         alert("System config saved!");
     } catch(e) { alert("Error saving settings"); }
+}
+
+function onDetectionModeChange() {
+    const modeSelector = document.getElementById('modeSelector');
+    const mode = modeSelector.value;
+    const thresholdContainer = document.getElementById('thresholdContainer');
+    
+    // Show/hide threshold container based on mode
+    if (mode === 'voting') {
+        thresholdContainer.style.display = 'flex';
+    } else {
+        thresholdContainer.style.display = 'none';
+    }
+}
+
+function initDetectionModeDropdown() {
+    const modeSelector = document.getElementById('modeSelector');
+    if (!modeSelector) return;
+    
+    // Set up the initial visibility of threshold container based on current mode
+    const mode = modeSelector.value || 'voting';
+    const thresholdContainer = document.getElementById('thresholdContainer');
+    if (thresholdContainer) {
+        thresholdContainer.style.display = (mode === 'voting') ? 'flex' : 'none';
+    }
+    
+    // Add change listener
+    modeSelector.addEventListener('change', onDetectionModeChange);
 }
 
 // --- NAVIGATION ---
@@ -208,6 +260,7 @@ function switchView(view) {
     else if(view==='flows') document.getElementById('menu-flows').classList.add('active');
     else if(view==='incoming-files') document.getElementById('menu-incoming-files').classList.add('active');
     else if(view==='settings') document.getElementById('menu-settings').classList.add('active');
+    else if(view==='ips-database') document.getElementById('menu-ips-database').classList.add('active');
     
     // Stop previous auto-refreshes
     stopFlowsAutoRefresh();
@@ -216,10 +269,14 @@ function switchView(view) {
     if (view === 'dashboard') setTimeout(() => { resizeCharts(); updateDashboard(); }, 50);
     else if (view === 'flows') { 
         loadFlowsSummary();
+        loadConsensusLogs(1);  // Load consensus logs when switching to flows view
         startFlowsAutoRefresh();
     }
     else if (view === 'incoming-files') {
         startFilesAutoRefresh();
+    }
+    else if (view === 'ips-database') {
+        loadIPSRules();
     }
     currentView = view;
 }
@@ -233,7 +290,13 @@ function switchModel(el, model, task) {
     switchView('model');
     document.getElementById('view-model').classList.add('active');
     document.getElementById('model-title').textContent = `${model} (${task})`;
+    document.getElementById('model-title').classList.add('model-name');
     resetPagination();
+    
+    // Update top flows when model changes
+    if (document.getElementById('topFlowsBody')) {
+        loadTopFlows();
+    }
 }
 
 function resetPagination() {
@@ -590,6 +653,11 @@ function showDetails(id) {
         .then(r=>r.json())
         .then(d=>{
             const panel = document.getElementById('panelContent');
+            const titleElem = document.getElementById('detailPanelTitle');
+            
+            // Set title
+            titleElem.innerHTML = '<i class="fas fa-list-alt" style="color:var(--text-main); margin-right:8px;"></i> Log Details';
+            
             let isThreat = !(String(d.result).toLowerCase().includes('safe') || 
                              String(d.result).toLowerCase().includes('benign') || 
                              d.result == '0');
@@ -724,12 +792,18 @@ async function updateDashboard() {
             if(f.status.includes('Threat')) badge = 'badge-danger';
             else if(f.status.includes('Safe')) badge = 'badge-safe';
             
-            return `<tr>
+            // Escape single quotes in filename for onclick handler
+            const safeName = f.name.replace(/'/g, "\\'");
+            
+            return `<tr style="cursor:pointer;" onclick="showFileDetails('${safeName}')" title="Click to view details">
                         <td style="font-weight:600;">${f.name}</td>
                         <td>${f.size_mb} MB</td>
                         <td><span class="badge ${badge}">${f.status}</span></td>
                     </tr>`;
         }).join('');
+        
+        // Load top flows widget
+        loadTopFlows();
     } catch(e) { console.error("Dash Error", e); }
 }
 
@@ -897,10 +971,325 @@ async function loadFlowsSummary() {
         alert('Error loading flows summary: ' + e.message);
     }
 }
-// --- INCOMING FILES MANAGEMENT ---
-async function loadIncomingFiles() {
+
+// --- CONSENSUS VOTING LOGS ---
+let consensusCurrentPage = 1;
+let consensusTotalPages = 1;
+let consensusTotalLogs = 0;
+let consensusPageSize = 50;
+let consensusSortBy = 'time';
+let consensusSortOrder = 'desc';
+
+async function loadConsensusLogs(page = 1) {
     try {
-        const res = await fetch('/api/incoming-files');
+        const search = document.getElementById('consensusSearchInput')?.value || '';
+        const resultFilter = document.getElementById('consensusResultFilter')?.value || '';
+        const votesFilter = document.getElementById('consensusVotesFilter')?.value || '';
+        
+        const offset = (page - 1) * consensusPageSize;
+        let url = `/api/get_consensus_logs?offset=${offset}&limit=${consensusPageSize}&sort_by=${consensusSortBy}&sort_order=${consensusSortOrder}`;
+        
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (resultFilter) url += `&filter_result=${encodeURIComponent(resultFilter)}`;
+        if (votesFilter) url += `&filter_votes=${encodeURIComponent(votesFilter)}`;
+        
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        consensusTotalLogs = data.total || 0;
+        consensusTotalPages = Math.max(1, Math.ceil(consensusTotalLogs / consensusPageSize));
+        consensusCurrentPage = page;
+        
+        const rows = (data.flows || []).map((f, idx) => {
+            const num = offset + idx + 1;
+            const time = formatEpochOrString(f.time_scaned);
+            const votes = f.votes || 0;
+            const result = f.result || '-';
+            const confidence = f.confidence || `${votes}/6`;
+            
+            // Style based on result
+            const resultClass = result === 'attack' ? 'badge-danger' : 'badge-safe';
+            const votesColor = votes >= 4 ? '#ef4444' : (votes >= 2 ? '#f59e0b' : '#10b981');
+            
+            return `<tr style="cursor:pointer; border-bottom:1px solid var(--border-color);" onclick="showConsensusDetails('${f.id}')">
+                <td style="padding:8px;">${num}</td>
+                <td style="padding:8px;">${time}</td>
+                <td style="padding:8px;">${f.file_scaned || '-'}</td>
+                <td style="padding:8px; color:#3b82f6; font-weight:600;">${f.IPV4_SRC_ADDR || '-'}</td>
+                <td style="padding:8px;">${f.L4_SRC_PORT || '-'}</td>
+                <td style="padding:8px; color:#3b82f6; font-weight:600;">${f.IPV4_DST_ADDR || '-'}</td>
+                <td style="padding:8px;">${f.L4_DST_PORT || '-'}</td>
+                <td style="padding:8px; font-weight:700; color:${votesColor};">${confidence}</td>
+                <td style="padding:8px;"><span class="badge ${resultClass}">${result}</span></td>
+            </tr>`;
+        }).join('');
+        
+        document.getElementById('consensusLogsBody').innerHTML = rows || 
+            '<tr><td colspan="9" style="padding:20px; text-align:center; color:var(--text-muted);">No consensus logs available</td></tr>';
+        
+        updateConsensusPagination();
+        updateConsensusSortIndicators();
+        
+    } catch(e) {
+        console.error("Consensus Logs Error", e);
+        document.getElementById('consensusLogsBody').innerHTML = 
+            '<tr><td colspan="9" style="padding:20px; text-align:center; color:#ef4444;">Error loading logs</td></tr>';
+    }
+}
+
+function updateConsensusPagination() {
+    document.getElementById('consensusPageDisplay').textContent = `Page ${consensusCurrentPage} / ${consensusTotalPages}`;
+    document.getElementById('consensusPrevBtn').disabled = (consensusCurrentPage <= 1);
+    document.getElementById('consensusNextBtn').disabled = (consensusCurrentPage >= consensusTotalPages);
+}
+
+function consensusPrevPage() {
+    if (consensusCurrentPage > 1) loadConsensusLogs(consensusCurrentPage - 1);
+}
+
+function consensusNextPage() {
+    if (consensusCurrentPage < consensusTotalPages) loadConsensusLogs(consensusCurrentPage + 1);
+}
+
+function sortConsensusLogs(column) {
+    if (consensusSortBy === column) {
+        consensusSortOrder = consensusSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        consensusSortBy = column;
+        consensusSortOrder = 'desc';
+    }
+    loadConsensusLogs(1);
+}
+
+function updateConsensusSortIndicators() {
+    const columns = ['time', 'file', 'srcip', 'dstip', 'votes', 'result'];
+    columns.forEach(col => {
+        const el = document.getElementById(`consensusSort${col.charAt(0).toUpperCase() + col.slice(1)}`);
+        if (el) {
+            if (consensusSortBy === col) {
+                el.textContent = consensusSortOrder === 'asc' ? '↑' : '↓';
+            } else {
+                el.textContent = '';
+            }
+        }
+    });
+}
+
+function applyConsensusFilters() {
+    loadConsensusLogs(1);
+}
+
+function clearConsensusFilters() {
+    document.getElementById('consensusSearchInput').value = '';
+    document.getElementById('consensusResultFilter').value = '';
+    document.getElementById('consensusVotesFilter').value = '';
+    loadConsensusLogs(1);
+}
+
+async function clearConsensusLogs() {
+    if (!confirm('Are you sure you want to clear all consensus voting logs?')) return;
+    
+    try {
+        const res = await fetch('/api/clear_consensus_logs', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            alert(`Cleared ${data.deleted} consensus log entries`);
+            loadConsensusLogs(1);
+        } else {
+            alert('Error: ' + (data.message || 'Unknown error'));
+        }
+    } catch(e) {
+        alert('Error clearing logs: ' + e.message);
+    }
+}
+
+function showConsensusDetails(flowId) {
+    fetch(`/api/consensus-details/${flowId}`)
+        .then(r => r.json())
+        .then(d => {
+            if (d.error) {
+                alert('Error: ' + d.error);
+                return;
+            }
+            
+            const panel = document.getElementById('panelContent');
+            const titleElem = document.getElementById('detailPanelTitle');
+            
+            // Set title
+            titleElem.innerHTML = '<i class="fas fa-vote-yea" style="color:var(--text-main); margin-right:8px;"></i> Consensus Voting Details';
+            
+            let isThreat = !(String(d.result).toLowerCase().includes('safe') || 
+                             String(d.result).toLowerCase().includes('benign') || 
+                             d.result == '0');
+            
+            // Calculate confidence percentage
+            let confidencePercent = d.confidence ? (parseFloat(d.confidence) * 100).toFixed(1) : '-';
+            
+            // Determine vote status
+            let votesPassed = parseInt(d.votes) >= parseInt(d.threshold);
+            let votesClass = votesPassed ? 'forti-threat' : 'forti-safe';
+            let votesBadge = votesPassed ? 'badge-danger' : 'badge-safe';
+            
+            panel.innerHTML = `
+                <div class="forti-group">
+                    <div class="forti-group-title">General</div>
+                    <div class="forti-row"><span class="forti-label">Date/Time</span><span class="forti-val">${d.time_scaned || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">File Source</span><span class="forti-val">${d.file_scaned || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Flow ID</span><span class="forti-val">${d.id}</span></div>
+                </div>
+
+                <div class="forti-group">
+                    <div class="forti-group-title">Network Info</div>
+                    <div class="forti-row"><span class="forti-label">Source IP</span><span class="forti-val forti-ip">${d.IPV4_SRC_ADDR || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Source Port</span><span class="forti-val">${d.L4_SRC_PORT || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Dest IP</span><span class="forti-val forti-ip">${d.IPV4_DST_ADDR || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Dest Port</span><span class="forti-val">${d.L4_DST_PORT || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Protocol</span><span class="forti-val">${d.PROTOCOL || '-'}</span></div>
+                </div>
+
+                <div class="forti-group">
+                    <div class="forti-group-title">Voting Results</div>
+                    <div class="forti-row"><span class="forti-label">Detection Mode</span><span class="forti-val">${d.detection_mode || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Votes</span><span class="forti-val ${votesClass}" style="font-weight:600;">${d.votes || 0} / 6</span></div>
+                    <div class="forti-row"><span class="forti-label">Threshold</span><span class="forti-val">${d.threshold || '-'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Confidence</span><span class="forti-val">${confidencePercent}%</span></div>
+                </div>
+
+                <div class="forti-group">
+                    <div class="forti-group-title">Final Decision</div>
+                    <div class="forti-row"><span class="forti-label">Threat Level</span><span class="badge ${isThreat ? 'badge-danger' : 'badge-safe'}">${isThreat ? 'Critical' : 'Notice'}</span></div>
+                    <div class="forti-row"><span class="forti-label">Result</span><span class="forti-val ${isThreat ? 'forti-threat' : 'forti-safe'}" style="font-weight:600;">${d.result || '-'}</span></div>
+                </div>
+
+                <div class="forti-group" style="margin-top:16px;">
+                    <div class="forti-group-title">Voting Breakdown</div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; padding:8px;">
+                        <div style="text-align:center; padding:10px; background:var(--hover-bg); border-radius:6px;">
+                            <div style="font-size:12px; color:var(--text-secondary);">Attack Votes</div>
+                            <div style="font-size:20px; font-weight:600; color:#ef4444;">${d.votes || 0}</div>
+                        </div>
+                        <div style="text-align:center; padding:10px; background:var(--hover-bg); border-radius:6px;">
+                            <div style="font-size:12px; color:var(--text-secondary);">Benign Votes</div>
+                            <div style="font-size:20px; font-weight:600; color:#10b981;">${6 - (parseInt(d.votes) || 0)}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:10px; padding:8px; background:var(--hover-bg); border-radius:6px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <span style="font-size:11px; color:var(--text-secondary);">Vote Progress</span>
+                            <span style="font-size:11px; color:var(--text-secondary);">${d.votes || 0}/6 (Threshold: ${d.threshold || '-'})</span>
+                        </div>
+                        <div style="background:var(--border-color); border-radius:4px; height:8px; overflow:hidden;">
+                            <div style="width:${((parseInt(d.votes) || 0) / 6) * 100}%; height:100%; background:${isThreat ? '#ef4444' : '#10b981'}; transition:width 0.3s;"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('panelOverlay').classList.add('active');
+            document.getElementById('logDetailPanel').classList.add('active');
+        })
+        .catch(err => {
+            console.error('Error fetching consensus details:', err);
+            alert('Error loading details: ' + err.message);
+        });
+}
+
+// --- INCOMING FILES MANAGEMENT ---
+
+function togglePcapFilters() {
+    const panel = document.getElementById('pcapFiltersPanel');
+    const icon = document.getElementById('pcapFilterToggleIcon');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        icon.classList.remove('fa-chevron-down');
+        icon.classList.add('fa-chevron-up');
+    } else {
+        panel.style.display = 'none';
+        icon.classList.remove('fa-chevron-up');
+        icon.classList.add('fa-chevron-down');
+    }
+}
+
+function pcapResetFilters() {
+    document.getElementById('pcapSearchInput').value = '';
+    document.getElementById('pcapFilterName').value = '';
+    document.getElementById('pcapFilterStatus').value = '';
+    document.getElementById('pcapFilterThreat').value = '';
+    document.getElementById('pcapSortBy').value = 'upload_date';
+    pcapSortBy = 'upload_date';
+    pcapSortOrder = 'desc';
+    
+    // Clear global filter state
+    pcapFilterState = {
+        search: '',
+        filterName: '',
+        filterStatus: '',
+        filterThreat: ''
+    };
+    
+    pcapApplyFilters();
+}
+
+function pcapSortChange(field) {
+    if (pcapSortBy === field) {
+        // Toggle sort order
+        pcapSortOrder = pcapSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        pcapSortBy = field;
+        pcapSortOrder = 'desc';
+        document.getElementById('pcapSortBy').value = field;
+    }
+    pcapApplyFilters();
+}
+
+function pcapApplyFilters() {
+    const search = document.getElementById('pcapSearchInput')?.value || '';
+    const filterName = document.getElementById('pcapFilterName')?.value || '';
+    const filterStatus = document.getElementById('pcapFilterStatus')?.value || '';
+    const filterThreat = document.getElementById('pcapFilterThreat')?.value || '';
+    pcapSortBy = document.getElementById('pcapSortBy')?.value || 'upload_date';
+    
+    // Save filter state to global variable
+    pcapFilterState = {
+        search: search,
+        filterName: filterName,
+        filterStatus: filterStatus,
+        filterThreat: filterThreat
+    };
+    
+    // Log for debugging
+    console.log(`[PCAP Filter] Applying filters:`, pcapFilterState);
+    
+    loadIncomingFiles(search, filterName, filterStatus, filterThreat);
+}
+
+async function loadIncomingFiles(search = '', filterName = '', filterStatus = '', filterThreat = '') {
+    try {
+        // Use global filter state if no parameters provided
+        if (!search && !filterName && !filterStatus && !filterThreat) {
+            search = pcapFilterState.search || '';
+            filterName = pcapFilterState.filterName || '';
+            filterStatus = pcapFilterState.filterStatus || '';
+            filterThreat = pcapFilterState.filterThreat || '';
+            
+            console.log(`[PCAP] Using saved filter state:`, pcapFilterState);
+        }
+        
+        // Build query params
+        const params = new URLSearchParams({
+            search: search,
+            filter_name: filterName,
+            filter_status: filterStatus,
+            filter_threat: filterThreat,
+            sort_by: pcapSortBy,
+            sort_order: pcapSortOrder,
+            offset: 0,
+            limit: pcapPageSize
+        });
+        
+        const url = '/api/incoming-files?' + params.toString();
+        console.log(`[PCAP] Fetching: ${url}`);
+        
+        const res = await fetch(url);
         if (!res.ok) {
             console.error('Failed to load incoming files:', res.status);
             return;
@@ -910,6 +1299,15 @@ async function loadIncomingFiles() {
         const tbody = document.getElementById('filesTableIncoming');
         
         if (!tbody) return; // Element doesn't exist if not on that view
+        
+        pcapTotalFiles = data.total || 0;
+        
+        // Update sort indicators
+        document.getElementById('pcapSortName').textContent = pcapSortBy === 'name' ? (pcapSortOrder === 'asc' ? '↑' : '↓') : '';
+        document.getElementById('pcapSortSize').textContent = pcapSortBy === 'size' ? (pcapSortOrder === 'asc' ? '↑' : '↓') : '';
+        document.getElementById('pcapSortStatus').textContent = pcapSortBy === 'status' ? (pcapSortOrder === 'asc' ? '↑' : '↓') : '';
+        document.getElementById('pcapSortDate').textContent = pcapSortBy === 'upload_date' ? (pcapSortOrder === 'asc' ? '↑' : '↓') : '';
+        document.getElementById('pcapSortFlows').textContent = pcapSortBy === 'flows' ? (pcapSortOrder === 'asc' ? '↑' : '↓') : '';
         
         if (data.files && data.files.length > 0) {
             tbody.innerHTML = data.files.map(f => {
@@ -926,6 +1324,7 @@ async function loadIncomingFiles() {
                             <td style="padding:12px;">${f.size_mb} MB</td>
                             <td style="padding:12px;"><span class="badge ${badge}">${f.status}</span></td>
                             <td style="padding:12px; color:var(--text-muted);">${uploadDate}</td>
+                            <td style="padding:12px; text-align:center;">${f.total_flows || 0}</td>
                             <td style="padding:12px;">
                                 <button class="btn" style="padding:6px 12px; font-size:0.85em;" onclick="event.stopPropagation(); showFileDetails('${safeName}')">
                                     <i class="fas fa-eye"></i> View
@@ -934,7 +1333,7 @@ async function loadIncomingFiles() {
                         </tr>`;
             }).join('');
         } else {
-            tbody.innerHTML = '<tr><td colspan="5" style="padding:12px; text-align:center; color:var(--text-muted);">No files found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="padding:12px; text-align:center; color:var(--text-muted);">No files found</td></tr>';
         }
     } catch(e) {
         console.error('Load Files Error', e);
@@ -944,83 +1343,85 @@ async function loadIncomingFiles() {
 
 async function showFileDetails(filename) {
     try {
-        console.log('Loading details for file:', filename);
+        console.log('Loading PCAP details for file:', filename);
         
-        const res = await fetch(`/api/incoming-files?file=${encodeURIComponent(filename)}`);
+        const res = await fetch(`/api/pcap-details/${encodeURIComponent(filename)}`);
         const data = await res.json();
         
-        console.log('Response:', data);
+        console.log('PCAP Details Response:', data);
         
-        const panel = document.getElementById('pcapPanelContent');
-        const overlay = document.getElementById('fileDetailsPanel');
+        if (!res.ok || data.error) {
+            alert('Error: ' + (data.error || 'File not found'));
+            return;
+        }
         
-        if (!panel || !overlay) {
+        const panel = document.getElementById('panelContent');
+        const overlay = document.getElementById('panelOverlay');
+        const logPanel = document.getElementById('logDetailPanel');
+        const titleElem = document.getElementById('detailPanelTitle');
+        
+        if (!panel || !overlay || !logPanel) {
             console.error('Panel elements not found');
             alert('Error: Panel elements not initialized');
             return;
         }
         
-        if (!res.ok || data.status !== 'success') {
-            alert('Error: ' + (data.message || 'File not found'));
-            return;
+        // Set title
+        titleElem.innerHTML = '<i class="fas fa-file" style="color:var(--text-main); margin-right:8px;"></i> PCAP File Details';
+        
+        // Xác định status màu
+        let statusColor = '#f59e0b'; // warning default
+        if (data.status.includes('Threat')) statusColor = '#ef4444';
+        else if (data.status.includes('Safe')) statusColor = '#10b981';
+        
+        // Build actions buttons - chỉ show download nếu có threat
+        let actionsHTML = '';
+        if (data.is_threat && data.pcap_exists) {
+            actionsHTML = `
+                <button class="btn" onclick="downloadFile('${data.name.replace(/'/g, "\\'")}')" style="flex:1;">
+                    <i class="fas fa-download"></i> Download PCAP
+                </button>
+            `;
+        } else if (data.is_threat && !data.pcap_exists) {
+            actionsHTML = `<div style="padding:8px; background:#fef3c7; color:#d97706; border-radius:4px; text-align:center; font-size:0.9em;">PCAP file not available (deleted)</div>`;
+        } else {
+            actionsHTML = `<div style="padding:8px; background:#d1fae5; color:#059669; border-radius:4px; text-align:center; font-size:0.9em;">Safe PCAP (file deleted, metadata preserved)</div>`;
         }
         
-        if (data.file) {
-            const file = data.file;
-            console.log('File data:', file);
+        panel.innerHTML = `
+            <div class="forti-group">
+                <div class="forti-group-title">File Information</div>
+                <div class="forti-row"><span class="forti-label">Filename</span><span class="forti-val">${data.name}</span></div>
+                <div class="forti-row"><span class="forti-label">File Size</span><span class="forti-val">${data.size_mb} MB (${Math.round(data.size_bytes)} bytes)</span></div>
+                <div class="forti-row"><span class="forti-label">Analysis Date</span><span class="forti-val">${data.upload_date}</span></div>
+                <div class="forti-row"><span class="forti-label">PCAP ID</span><span class="forti-val">${data.pcap_id}</span></div>
+                <div class="forti-row"><span class="forti-label">Status</span><span class="forti-val" style="color:${statusColor}; font-weight:600;">${data.status}</span></div>
+            </div>
             
-            panel.innerHTML = `
-                <div class="forti-group">
-                    <div class="forti-group-title">File Information</div>
-                    <div class="forti-row"><span class="forti-label">Filename</span><span class="forti-val">${file.name}</span></div>
-                    <div class="forti-row"><span class="forti-label">File Size</span><span class="forti-val">${file.size_mb} MB (${Math.round(file.size_bytes)} bytes)</span></div>
-                    <div class="forti-row"><span class="forti-label">Upload Date</span><span class="forti-val">${file.upload_date || 'N/A'}</span></div>
-                    <div class="forti-row"><span class="forti-label">Status</span><span class="forti-val" style="color:${file.status.includes('Threat') ? '#ef4444' : file.status.includes('Safe') ? '#10b981' : '#f59e0b'};">${file.status}</span></div>
-                </div>
-                
-                <div class="forti-group">
-                    <div class="forti-group-title">Statistics</div>
-                    <div class="forti-row"><span class="forti-label">Total Flows</span><span class="forti-val">${file.total_flows || 'N/A'}</span></div>
-                    <div class="forti-row"><span class="forti-label">Threat Flows</span><span class="forti-val">${file.threat_flows || 'N/A'}</span></div>
-                    <div class="forti-row"><span class="forti-label">Safe Flows</span><span class="forti-val">${file.safe_flows || 'N/A'}</span></div>
-                </div>
-                
-                <div class="forti-group">
-                    <div class="forti-group-title">Actions</div>
-                    <div style="display:flex; gap:8px; margin-top:12px;">
-                        <button class="btn" onclick="downloadFile('${file.name.replace(/'/g, "\\'")}')" style="flex:1;">
-                            <i class="fas fa-download"></i> Download
-                        </button>
-                        <button class="btn" style="flex:1; background:#ef4444;" onclick="deleteFile('${file.name.replace(/'/g, "\\'")}'">
-                            <i class="fas fa-trash"></i> Delete
-                        </button>
-                    </div>
-                </div>
-            `;
+            <div class="forti-group">
+                <div class="forti-group-title">Traffic Statistics</div>
+                <div class="forti-row"><span class="forti-label">Total Flows</span><span class="forti-val">${data.total_flows || 0}</span></div>
+                <div class="forti-row"><span class="forti-label">Threat Flows</span><span class="forti-val forti-threat">${data.threat_flows || 0}</span></div>
+                <div class="forti-row"><span class="forti-label">Safe Flows</span><span class="forti-val forti-safe">${data.safe_flows || 0}</span></div>
+            </div>
             
-            console.log('Setting overlay display to block');
-            overlay.classList.add('active');
-            const detailPanel = document.getElementById('pcapDetailPanel');
-            if (detailPanel) {
-                detailPanel.classList.add('active');
-                console.log('Detail panel displayed');
-            } else {
-                console.error('pcapDetailPanel element not found');
-            }
-        } else {
-            alert('Error: File data not found in response');
-        }
+            <div class="forti-group">
+                <div class="forti-group-title">Actions</div>
+                <div style="display:flex; gap:8px; margin-top:12px;">
+                    ${actionsHTML}
+                </div>
+            </div>
+        `;
+        
+        // Hiển thị panel
+        overlay.classList.add('active');
+        logPanel.classList.add('active');
+        
+        console.log('PCAP file details displayed successfully');
     } catch(e) {
-        console.error('File Details Error', e);
+        console.error('PCAP Details Error', e);
         alert('Error loading file details: ' + e.message);
     }
-}
-
-function closeFileDetails() {
-    const overlay = document.getElementById('fileDetailsPanel');
-    const panel = document.getElementById('pcapDetailPanel');
-    if (overlay) overlay.classList.remove('active');
-    if (panel) panel.classList.remove('active');
 }
 
 async function downloadFile(filename) {
@@ -1080,3 +1481,293 @@ function stopFlowsAutoRefresh() {
         clearInterval(flowsRefreshInterval);
     }
 }
+
+// Format bytes to human-readable format
+function formatBytes(bytes) {
+    if (!bytes || isNaN(bytes)) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(Math.max(1, bytes)) / Math.log(k));
+    const value = (bytes / Math.pow(k, i)).toFixed(2);
+    return value + ' ' + sizes[i];
+}
+
+// Load and display top 5 flows by traffic
+async function loadTopFlows() {
+    try {
+        const model = selectedModel || 'Random Forest';
+        const task = selectedTask || 'binary';
+        const resp = await fetch(`/api/top-flows?model=${encodeURIComponent(model)}&task=${encodeURIComponent(task)}`);
+        const data = await resp.json();
+        
+        const tbody = document.getElementById('topFlowsBody');
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        
+        if (data.flows && data.flows.length > 0) {
+            data.flows.forEach(flow => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td style="padding:8px;">${flow.IPV4_SRC_ADDR || '-'}</td>
+                    <td style="padding:8px;">${flow.L4_SRC_PORT || '-'}</td>
+                    <td style="padding:8px;">${flow.IPV4_DST_ADDR || '-'}</td>
+                    <td style="padding:8px;">${flow.L4_DST_PORT || '-'}</td>
+                    <td style="padding:8px;">${flow.PROTOCOL || '-'}</td>
+                    <td style="padding:8px; font-weight:600; color:var(--text-main);">${formatBytes(flow.total_traffic)}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" style="padding:12px; text-align:center; color:var(--text-muted);">No flows data available</td></tr>';
+        }
+    } catch (e) {
+        console.error('Load top flows error:', e);
+    }
+}
+// --- IPS DATABASE FUNCTIONS ---
+async function loadIPSRules() {
+    try {
+        console.log('Loading IPS rules...');
+        
+        const res = await fetch('/api/ips-rules');
+        const data = await res.json();
+        
+        console.log('IPS Rules Response:', data);
+        
+        // Update statistics
+        if (data.statistics) {
+            document.getElementById('stat-total').textContent = data.statistics.total_rules || 0;
+            document.getElementById('stat-critical').textContent = data.statistics.critical_rules || 0;
+            document.getElementById('stat-high').textContent = data.statistics.high_rules || 0;
+            document.getElementById('stat-medium').textContent = data.statistics.medium_rules || 0;
+            document.getElementById('stat-low').textContent = data.statistics.low_rules || 0;
+        }
+        
+        // Render rules table
+        const tbody = document.getElementById('ipsRulesBody');
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        
+        if (data.rules && data.rules.length > 0) {
+            data.rules.forEach(rule => {
+                const severityColor = {
+                    'Critical': '#ef4444',
+                    'High': '#f59e0b',
+                    'Medium': '#3b82f6',
+                    'Low': '#10b981'
+                }[rule.severity] || '#6b7280';
+                
+                const row = document.createElement('tr');
+                row.style.cursor = 'pointer';
+                row.style.borderBottom = '1px solid var(--border-color)';
+                row.onclick = () => showIPSRuleDetails(rule.rule_id);
+                
+                row.innerHTML = `
+                    <td style="padding:12px; font-weight:600; color:var(--text-main);">${rule.rule_id}</td>
+                    <td style="padding:12px;">${rule.rule_name}</td>
+                    <td style="padding:12px;">${rule.category}</td>
+                    <td style="padding:12px; text-align:center;"><span style="background:${severityColor}; color:white; padding:4px 8px; border-radius:4px; font-size:0.85em; font-weight:600;">${rule.severity}</span></td>
+                    <td style="padding:12px; text-align:center;">${rule.source}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" style="padding:12px; text-align:center; color:var(--text-muted);">No IPS rules available</td></tr>';
+        }
+    } catch (e) {
+        console.error('Load IPS rules error:', e);
+    }
+}
+
+async function showIPSRuleDetails(ruleId) {
+    try {
+        console.log('Loading IPS rule details:', ruleId);
+        
+        const res = await fetch(`/api/ips-rules/${ruleId}`);
+        const rule = await res.json();
+        
+        console.log('IPS Rule Details:', rule);
+        
+        if (!res.ok || rule.error) {
+            alert('Error loading rule details');
+            return;
+        }
+        
+        const panel = document.getElementById('panelContent');
+        const overlay = document.getElementById('panelOverlay');
+        const logPanel = document.getElementById('logDetailPanel');
+        const titleElem = document.getElementById('detailPanelTitle');
+        
+        if (!panel || !overlay || !logPanel) {
+            console.error('Panel elements not found');
+            return;
+        }
+        
+        // Set title
+        titleElem.innerHTML = '<i class="fas fa-shield" style="color:var(--text-main); margin-right:8px;"></i> IPS Rule Details';
+        
+        const severityColor = {
+            'Critical': '#ef4444',
+            'High': '#f59e0b',
+            'Medium': '#3b82f6',
+            'Low': '#10b981'
+        }[rule.severity] || '#6b7280';
+        
+        panel.innerHTML = `
+            <div class="forti-group">
+                <div class="forti-group-title">Rule Information</div>
+                <div class="forti-row"><span class="forti-label">Rule ID</span><span class="forti-val" style="font-family:monospace;">${rule.rule_id}</span></div>
+                <div class="forti-row"><span class="forti-label">Rule Name</span><span class="forti-val">${rule.rule_name}</span></div>
+                <div class="forti-row"><span class="forti-label">Source</span><span class="forti-val">${rule.source}</span></div>
+                <div class="forti-row"><span class="forti-label">Version</span><span class="forti-val">${rule.version}</span></div>
+                <div class="forti-row"><span class="forti-label">Last Updated</span><span class="forti-val">${rule.last_updated}</span></div>
+            </div>
+            
+            <div class="forti-group">
+                <div class="forti-group-title">Threat Classification</div>
+                <div class="forti-row"><span class="forti-label">Severity</span><span style="background:${severityColor}; color:white; padding:4px 8px; border-radius:4px; font-size:0.85em; font-weight:600;">${rule.severity}</span></div>
+                <div class="forti-row"><span class="forti-label">Category</span><span class="forti-val">${rule.category}</span></div>
+                <div class="forti-row"><span class="forti-label">Description</span><span class="forti-val">${rule.description}</span></div>
+            </div>
+            
+            <div class="forti-group">
+                <div class="forti-group-title">Network Details</div>
+                <div class="forti-row"><span class="forti-label">Protocol</span><span class="forti-val">${rule.protocol}</span></div>
+                <div class="forti-row"><span class="forti-label">Port(s)</span><span class="forti-val">${rule.port}</span></div>
+            </div>
+            
+            <div class="forti-group">
+                <div class="forti-group-title">Rule Content</div>
+                <div style="background:var(--bg-secondary); padding:12px; border-radius:6px; font-family:monospace; font-size:0.85em; overflow-x:auto; max-height:200px; overflow-y:auto;">
+                    ${rule.rule_content}
+                </div>
+            </div>
+            
+            <div class="forti-group">
+                <div class="forti-group-title">Statistics</div>
+                <div class="forti-row"><span class="forti-label">False Positive Rate</span><span class="forti-val">${(rule.false_positive_rate * 100).toFixed(2)}%</span></div>
+            </div>
+            
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); display: flex; gap: 8px;">
+                <button class="btn btn-danger" onclick="deleteIPSRule('${rule.rule_id}')" style="flex: 1; background: #ef4444; border: none; color: white;">
+                    <i class="fas fa-trash"></i> Delete Rule
+                </button>
+            </div>
+        `;
+        
+        // Show panel
+        overlay.classList.add('active');
+        logPanel.classList.add('active');
+        
+    } catch(e) {
+        console.error('IPS Rule Details Error:', e);
+        alert('Error loading rule details');
+    }
+}
+
+// Import IPS Rules - File Upload
+async function importIPSRulesFromFile() {
+    const fileInput = document.getElementById('ips-import-file');
+    if (!fileInput || !fileInput.files.length) {
+        alert('Please select a file');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        const res = await fetch('/api/ips-rules/import-file', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            alert(`Success! Imported ${data.imported_count} rules`);
+            fileInput.value = '';
+            document.getElementById('ips-import-file-label').textContent = 'Choose CSV file';
+            loadIPSRules();
+        } else {
+            alert(`Error: ${data.message}`);
+        }
+    } catch (e) {
+        alert(`Import error: ${e.message}`);
+    }
+}
+
+// Import IPS Rules - URL
+async function importIPSRulesFromURL() {
+    const urlInput = document.getElementById('ips-import-url');
+    const url = urlInput.value.trim();
+    
+    if (!url) {
+        alert('Please enter a URL');
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/ips-rules/import-url', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url: url })
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            alert(`Success! ${data.message}`);
+            urlInput.value = '';
+            loadIPSRules();
+        } else {
+            alert(`Error: ${data.message}`);
+        }
+    } catch (e) {
+        alert(`Import error: ${e.message}`);
+    }
+}
+
+// Update file input label
+document.addEventListener('change', function(e) {
+    if (e.target.id === 'ips-import-file') {
+        const label = document.getElementById('ips-import-file-label');
+        if (label && e.target.files.length > 0) {
+            label.textContent = e.target.files[0].name;
+        }
+    }
+});
+
+// Delete IPS Rule
+async function deleteIPSRule(ruleId) {
+    if (!confirm(`Delete rule ${ruleId}? This action cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        const res = await fetch(`/api/ips-rules/${ruleId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            alert('Rule deleted successfully');
+            document.getElementById('panelOverlay').classList.remove('active');
+            document.getElementById('logDetailPanel').classList.remove('active');
+            loadIPSRules();
+        } else {
+            alert(`Error: ${data.message}`);
+        }
+    } catch (e) {
+        alert(`Delete error: ${e.message}`);
+    }
+}
+
+// Initialize IPS rules when switching to IPS database view
+let ipsRulesInitialized = false;

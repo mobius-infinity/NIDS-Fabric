@@ -38,6 +38,24 @@
                     </table>
                 </div>
             </div>
+            <div class="card widget-wide">
+                <div class="card-header"><span>Top 5 Flows by Traffic</span></div>
+                <div class="card-body" style="padding:0; height:auto; max-height:300px; overflow-y:auto;">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+                        <thead style="position:sticky; top:0; background:var(--bg-secondary);">
+                            <tr>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Src IP</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Src Port</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Dst IP</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Dst Port</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Protocol</th>
+                                <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border-color);">Total Traffic</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topFlowsBody"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -65,6 +83,75 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Consensus Voting Logs Section -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <span><i class="fas fa-gavel" style="margin-right: 8px;"></i>Consensus Voting Logs</span>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn" onclick="loadConsensusLogs()" style="font-size: 0.85em; padding: 6px 12px;">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn" style="font-size: 0.85em; padding: 6px 12px; background: #ef4444;" onclick="clearConsensusLogs()">
+                        <i class="fas fa-trash"></i> Clear
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" style="padding: 0;">
+                <!-- Filter Panel -->
+                <div style="padding: 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <input id="consensusSearchInput" type="text" placeholder="Search..." style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; width: 200px;">
+                        <select id="consensusResultFilter" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px;">
+                            <option value="">All Results</option>
+                            <option value="attack">Attack</option>
+                            <option value="benign">Benign</option>
+                        </select>
+                        <select id="consensusVotesFilter" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px;">
+                            <option value="">All Votes</option>
+                            <option value="1">≥1 vote</option>
+                            <option value="2">≥2 votes</option>
+                            <option value="3">≥3 votes</option>
+                            <option value="4">≥4 votes</option>
+                            <option value="5">≥5 votes</option>
+                            <option value="6">6 votes (All agree)</option>
+                        </select>
+                        <button class="btn" onclick="applyConsensusFilters()" style="font-size: 0.85em; padding: 6px 12px;">
+                            <i class="fas fa-filter"></i> Filter
+                        </button>
+                        <button class="btn" onclick="clearConsensusFilters()" style="font-size: 0.85em; padding: 6px 12px;">
+                            <i class="fas fa-times"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <!-- Table -->
+                <div style="height: 400px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 10;">
+                            <tr>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); width: 50px;">#</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('time')">Time <span id="consensusSortTime"></span></th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('file')">File <span id="consensusSortFile"></span></th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('srcip')">Src IP <span id="consensusSortSrcip"></span></th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Src Port</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('dstip')">Dst IP <span id="consensusSortDstip"></span></th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Dst Port</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('votes')">Votes <span id="consensusSortVotes"></span></th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('result')">Result <span id="consensusSortResult"></span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="consensusLogsBody"></tbody>
+                    </table>
+                </div>
+                <!-- Pagination -->
+                <div style="padding: 12px; display: flex; justify-content: center; gap: 8px; align-items: center; border-top: 1px solid var(--border-color);">
+                    <button class="btn" id="consensusPrevBtn" onclick="consensusPrevPage()" disabled style="font-size: 0.85em;">&lt; Prev</button>
+                    <span id="consensusPageDisplay" style="font-size: 0.9em;">Page 1 / 1</span>
+                    <button class="btn" id="consensusNextBtn" onclick="consensusNextPage()" disabled style="font-size: 0.85em;">Next &gt;</button>
+                </div>
+            </div>
+        </div>
+        
         <div class="dashboard-grid">
             <div class="card widget-wide">
                 <div class="card-header"><span>Attack Flow Details (Latest 10)</span></div>
@@ -97,15 +184,94 @@
                 <button class="btn" onclick="document.getElementById('pcapUploadInputIncoming').click()"><i class="fas fa-upload"></i> Upload PCAP</button>
             </div>
         </div>
+
+        <!-- PCAP Filter Panel -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <i class="fas fa-filter"></i> Search & Filter
+                <button style="float:right; background:none; border:none; cursor:pointer; color:var(--text-main);" onclick="togglePcapFilters()">
+                    <i id="pcapFilterToggleIcon" class="fas fa-chevron-down"></i>
+                </button>
+            </div>
+            <div id="pcapFiltersPanel" class="card-body" style="display:block; padding:16px; border-top: 1px solid var(--border-color);">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 12px;">
+                    <!-- Global Search -->
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.9em;">Search</label>
+                        <input type="text" id="pcapSearchInput" placeholder="File name, status..." style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-main); color:var(--text-main);" onkeyup="pcapApplyFilters()">
+                    </div>
+                    
+                    <!-- Filter by Name -->
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.9em;">Filename</label>
+                        <input type="text" id="pcapFilterName" placeholder="e.g., synscan" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-main); color:var(--text-main);" onchange="pcapApplyFilters()">
+                    </div>
+                    
+                    <!-- Filter by Status -->
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.9em;">Status</label>
+                        <select id="pcapFilterStatus" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-main); color:var(--text-main);" onchange="pcapApplyFilters()">
+                            <option value="">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="done">Done</option>
+                            <option value="error">Error</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Filter by Threat Level -->
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.9em;">Threat Level</label>
+                        <select id="pcapFilterThreat" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-main); color:var(--text-main);" onchange="pcapApplyFilters()">
+                            <option value="">All Files</option>
+                            <option value="threat">Threat Only</option>
+                            <option value="safe">Safe Only</option>
+                        </select>
+                    </div>
+
+                    <!-- Sort By -->
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-weight:600; font-size:0.9em;">Sort By</label>
+                        <select id="pcapSortBy" style="width:100%; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-main); color:var(--text-main);" onchange="pcapApplyFilters()">
+                            <option value="upload_date">Upload Date</option>
+                            <option value="name">Filename</option>
+                            <option value="size">File Size</option>
+                            <option value="status">Status</option>
+                            <option value="flows">Total Flows</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; gap: 8px; align-items: flex-end;">
+                        <button class="btn" style="flex:1;" onclick="pcapResetFilters()"><i class="fas fa-undo"></i> Reset</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-body" style="padding:0;">
                 <table style="margin:0;">
                     <thead>
                         <tr>
-                            <th>Filename</th>
-                            <th>Size</th>
-                            <th>Status</th>
-                            <th>Upload Date</th>
+                            <th onclick="pcapSortChange('name')" style="cursor:pointer;">
+                                Filename
+                                <span id="pcapSortName"></span>
+                            </th>
+                            <th onclick="pcapSortChange('size')" style="cursor:pointer;">
+                                Size
+                                <span id="pcapSortSize"></span>
+                            </th>
+                            <th onclick="pcapSortChange('status')" style="cursor:pointer;">
+                                Status
+                                <span id="pcapSortStatus"></span>
+                            </th>
+                            <th onclick="pcapSortChange('upload_date')" style="cursor:pointer;">
+                                Upload Date
+                                <span id="pcapSortDate"></span>
+                            </th>
+                            <th onclick="pcapSortChange('flows')" style="cursor:pointer;">
+                                Flows
+                                <span id="pcapSortFlows"></span>
+                            </th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -114,13 +280,6 @@
             </div>
         </div>
         <div id="fileDetailsPanel" class="slide-overlay" onclick="closeFileDetails()" style="display:none;"></div>
-        <div class="forti-panel" id="pcapDetailPanel" style="display:none;">
-            <div class="forti-header">
-                <span><i class="fas fa-file" style="color:var(--text-main); margin-right:8px;"></i> PCAP File Details</span>
-                <button class="close-panel-btn" onclick="closeFileDetails()">&times;</button>
-            </div>
-            <div class="forti-content" id="pcapPanelContent"></div>
-        </div>
     </div>
 
     <div id="view-settings" class="view-section">
@@ -157,34 +316,49 @@
                     </form>
                 </div>
             </div>
-
+        </div>
+        
+        <div style="height: 32px;"></div>
+        
+        <h2 style="margin-bottom: 24px; color: var(--text-main); margin-top: 40px; padding-top: 24px; border-top: 2px solid var(--border-color);">System Configuration</h2>
+        <div class="dashboard-grid">
             <div class="card widget-wide">
-                <div class="card-header"><i class="fas fa-cogs"></i> System Logic</div>
+                <div class="card-header"><i class="fas fa-brain"></i> Detection Mode</div>
                 <div class="card-body">
-                    <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="setting-group" style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
                         <div>
-                            <div style="font-weight:600;">Detection Mode</div>
-                            <div style="font-size:0.9em; color:#64748b;">
-                                <strong style="color:var(--text-main)">Voting (default):</strong> Requires consensus.<br>
-                                <strong>RF Only:</strong> Uses only Random Forest (faster).
+                            <div style="font-weight: 600; font-size: 1.1em; margin-bottom: 8px;">Detection Mode Selection</div>
+                            <div style="font-size: 0.9em; color: #64748b; line-height: 1.6;">
+                                <div><strong style="color: var(--text-main);">Voting Mode:</strong> Ensemble consensus from 6 models (RF, LightGBM, DNN × binary/multiclass).</div>
+                                <div style="margin-top: 8px;"><strong style="color: var(--text-main);">RF Only Mode:</strong> Fast single-model detection using Random Forest only.</div>
                             </div>
                         </div>
-                        <label class="switch"><input type="checkbox" id="modeSwitch"><span class="slider"></span></label>
-                    </div>
-                    
-                    <div class="setting-group" style="border-bottom:none; margin-top:20px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div>
-                                <div style="font-weight:600;">Voting Threshold</div>
-                                <div style="font-size:0.9em; color:#64748b;">Minimum votes to trigger alert (Max 6).</div>
+                        <div style="display: flex; flex-direction: column; gap: 16px; min-width: 280px;">
+                            <div style="display: flex; flex-direction: column; gap: 8px;">
+                                <label style="font-weight: 600; font-size: 0.95em;">Select Mode:</label>
+                                <select id="modeSelector" style="padding: 10px 12px; border: 2px solid var(--border-color); border-radius: 6px; font-size: 0.95em; background: var(--bg-secondary); color: var(--text-main); cursor: pointer; transition: all 0.2s;" onchange="onDetectionModeChange()">
+                                    <option value="voting">Voting Mode (Recommended)</option>
+                                    <option value="rf_only">RF Only Mode (Fast)</option>
+                                </select>
                             </div>
-                            <div style="font-weight:800; font-size:1.2em; color:var(--text-main);" id="thresh-display">2/6</div>
+                            
+                            <div id="thresholdContainer" style="display: flex; flex-direction: column; gap: 8px; animation: slideDown 0.3s ease;">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <label style="font-weight: 600; font-size: 0.95em;">Voting Threshold:</label>
+                                    <span id="thresh-display" style="font-weight: 800; font-size: 1.3em; color: #3b82f6;">2/6</span>
+                                </div>
+                                <input type="range" id="threshSlider" min="1" max="6" value="2" style="width: 100%; height: 6px; border-radius: 3px; background: var(--border-color); outline: none; -webkit-appearance: none; cursor: pointer;" oninput="document.getElementById('thresh-display').textContent = this.value + '/6'">
+                                <div style="font-size: 0.85em; color: #64748b; display: flex; justify-content: space-between; margin-top: 4px;">
+                                    <span>Strict (1)</span>
+                                    <span>Balanced (2-4)</span>
+                                    <span>Conservative (6)</span>
+                                </div>
+                            </div>
                         </div>
-                        <input type="range" id="threshSlider" min="1" max="6" value="2" style="width:100%; cursor:pointer;" oninput="document.getElementById('thresh-display').textContent = this.value + '/6'">
                     </div>
 
-                    <div style="text-align:right;">
-                        <button class="btn btn-primary" onclick="saveSystemSettings()"><i class="fas fa-save"></i> Apply Config</button>
+                    <div style="text-align: right; margin-top: 24px;">
+                        <button class="btn btn-primary" onclick="saveSystemSettings()"><i class="fas fa-save"></i> Apply Configuration</button>
                     </div>
                 </div>
             </div>
@@ -209,7 +383,7 @@
                             <button class="btn" style="width: 100%; background: #ef4444; justify-content: flex-start;" onclick="clearFilteredLogs(); toggleClearLogsMenu()">
                                 <i class="fas fa-filter"></i> Clear Filtered Logs
                             </button>
-                        </div>
+                        </div>Vo
                         <div style="padding: 8px; border-bottom: 1px solid var(--border-color);">
                             <button class="btn" style="width: 100%; background: #f97316; justify-content: flex-start;" onclick="clearAllCurrentModel(); toggleClearLogsMenu()">
                                 <i class="fas fa-trash-alt"></i> Clear All (This Model)
@@ -269,10 +443,98 @@
         </div>
     </div>
 
+    <div id="view-ips-database" class="view-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2 style="margin: 0; color: var(--text-main);">IPS/IDS Rules Database</h2>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="ipsSearchBox" placeholder="Search rules..." style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; width: 250px;">
+                <button class="btn" onclick="loadIPSRules()"><i class="fas fa-sync-alt"></i> Refresh</button>
+            </div>
+        </div>
+        
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header"><span>Rules Statistics</span></div>
+            <div class="card-body" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; font-weight: 800; color: var(--text-main);" id="stat-total">0</div>
+                    <div style="font-size: 0.9em; color: var(--text-muted);">Total Rules</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; font-weight: 800; color: #ef4444;" id="stat-critical">0</div>
+                    <div style="font-size: 0.9em; color: var(--text-muted);">Critical</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; font-weight: 800; color: #f59e0b;" id="stat-high">0</div>
+                    <div style="font-size: 0.9em; color: var(--text-muted);">High</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; font-weight: 800; color: #3b82f6;" id="stat-medium">0</div>
+                    <div style="font-size: 0.9em; color: var(--text-muted);">Medium</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 2em; font-weight: 800; color: #10b981;" id="stat-low">0</div>
+                    <div style="font-size: 0.9em; color: var(--text-muted);">Low</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header"><span>Import Rules</span></div>
+            <div class="card-body">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <!-- File Upload -->
+                    <div>
+                        <h4 style="margin-top: 0; color: var(--text-main);">Upload CSV File</h4>
+                        <p style="color: var(--text-muted); font-size: 0.9em;">Import rules from a local CSV file. Required columns: rule_id, rule_name, severity, category</p>
+                        <div style="display: flex; gap: 8px;">
+                            <label for="ips-import-file" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; background: var(--bg-secondary); transition: all 0.3s;">
+                                <span id="ips-import-file-label" style="color: var(--text-muted); font-weight: 500;">Choose CSV file</span>
+                                <input type="file" id="ips-import-file" accept=".csv" style="display: none;" />
+                            </label>
+                            <button class="btn" onclick="importIPSRulesFromFile()" style="white-space: nowrap;">
+                                <i class="fas fa-upload"></i> Import
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- URL Import -->
+                    <div>
+                        <h4 style="margin-top: 0; color: var(--text-main);">Import from URL</h4>
+                        <p style="color: var(--text-muted); font-size: 0.9em;">Download rules from a remote CSV URL. Supports public threat intelligence feeds.</p>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="ips-import-url" placeholder="https://example.com/rules.csv" style="flex: 1; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px;" />
+                            <button class="btn" onclick="importIPSRulesFromURL()" style="white-space: nowrap;">
+                                <i class="fas fa-globe"></i> Import
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header"><span>IPS Rules</span></div>
+            <div class="card-body" style="padding: 0; height: 600px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
+                        <tr>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Rule ID</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Rule Name</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Category</th>
+                            <th style="padding: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">Severity</th>
+                            <th style="padding: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">Source</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ipsRulesBody" style="cursor: pointer;"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div class="slide-overlay" id="panelOverlay" onclick="closeDetails()"></div>
     <div class="forti-panel" id="logDetailPanel">
         <div class="forti-header">
-            <span><i class="fas fa-list-alt" style="color:var(--text-main); margin-right:8px;"></i> Log Details</span>
+            <span id="detailPanelTitle"><i class="fas fa-list-alt" style="color:var(--text-main); margin-right:8px;"></i> Details</span>
             <button class="close-panel-btn" onclick="closeDetails()">&times;</button>
         </div>
         <div class="forti-content" id="panelContent">

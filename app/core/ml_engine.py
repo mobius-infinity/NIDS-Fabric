@@ -106,6 +106,12 @@ model_cache = ModelCache()
 # --- CÁC HÀM PREDICT (Giữ nguyên logic app4.py) ---
 
 def get_binary_prediction_vector(df, model, scaler, model_type, feat_cols):
+    """
+    Trả về vector 0/1 cho dự đoán binary (0=benign, 1=attack).
+    Hỗ trợ cả binary và multiclass models - multiclass sẽ được convert sang binary.
+    
+    Lưu ý: Với RF multiclass, Benign thường là class 1 (không phải 0) do label encoding.
+    """
     actual_cols = [c.lstrip('%') for c in feat_cols]
     for c in actual_cols: 
         if c not in df.columns: df[c] = 0
@@ -120,13 +126,31 @@ def get_binary_prediction_vector(df, model, scaler, model_type, feat_cols):
         if model_type == 'rf':
             preds = model.predict(X)
             if preds.dtype.kind in {'U', 'S', 'O'}: 
-                return np.array([1 if str(p).lower() in ['attack', '1', 'malware', 'dos'] else 0 for p in preds.flatten()])
-            return preds.flatten().astype(int)
+                # String labels: check if it's benign
+                return np.array([0 if str(p).lower() in ['benign', 'normal', '0'] else 1 for p in preds.flatten()])
+            else:
+                # Numeric labels from RF multiclass: class 1 = Benign (due to label encoder)
+                # For binary RF: 0 = benign, 1 = attack
+                # For multiclass RF: 1 = benign, others = attack
+                # We need to check model classes to determine benign class
+                if hasattr(model, 'classes_') and len(model.classes_) > 2:
+                    # Multiclass model: assume class 1 is benign (common encoding: ['Backdoor', 'Benign', ...])
+                    return np.array([0 if int(p) == 1 else 1 for p in preds.flatten()])
+                else:
+                    # Binary model: 0 = benign, 1 = attack
+                    return np.array([0 if int(p) == 0 else 1 for p in preds.flatten()])
             
         elif model_type in ['lightgbm', 'dnn']:
             probs = model.predict(X) if model_type == 'lightgbm' else model.predict(X, verbose=0)
             if probs.ndim > 1 and probs.shape[1] > 1: 
-                return np.array([0 if c == 0 else 1 for c in np.argmax(probs, axis=1)])
+                # Multiclass: class 1 = benign (for consistency with RF multiclass)
+                if probs.shape[1] > 2:
+                    # Multiclass with more than 2 classes
+                    return np.array([0 if c == 1 else 1 for c in np.argmax(probs, axis=1)])
+                else:
+                    # Binary: class 0 = benign
+                    return np.array([0 if c == 0 else 1 for c in np.argmax(probs, axis=1)])
+            # Binary probability: >= 0.5 = attack
             return np.array([1 if p >= 0.5 else 0 for p in probs.flatten()])
             
     except Exception as e:

@@ -1,0 +1,11 @@
+rule_id,rule_name,severity,category,description,source,protocol,port
+SID-2000001,Suspicious SSH Brute Force Attempt,High,Authentication Attack,Detects excessive SSH login attempts from a single source,Suricata,TCP,22
+SID-2000002,SQL Injection Attack Detection,Critical,Web Attack,Detects SQL injection patterns in HTTP requests,OWASP CRS,TCP,80
+SID-2000003,Port Scanning Activity Detected,Medium,Reconnaissance,Detects port scanning attempts using SYN packets,Snort,TCP,any
+SID-2000004,Malware C2 Communication Pattern,Critical,Malware,Detects known malware command and control server communication,Alien Vault OTX,TCP,any
+SID-2000005,DNS Tunneling Detection,High,Data Exfiltration,Detects DNS query patterns consistent with DNS tunneling attacks,Snort,UDP,53
+SID-3000001,HTTP Slowloris Attack,High,Denial of Service,Slow HTTP requests to exhaust server resources,Custom,TCP,80
+SID-3000002,SMTP Open Relay Abuse,Medium,Lateral Movement,Detects SMTP server used for spam relay,Custom,TCP,25
+SID-3000003,FTP Brute Force,High,Authentication Attack,Multiple FTP login failures from same source,Custom,TCP,21
+SID-3000004,RDP Exploit Attempt,Critical,Remote Access,Detects CVE-based RDP exploitation patterns,Custom,TCP,3389
+SID-3000005,XSS Payload Detection,High,Web Attack,Cross-site scripting payload patterns in HTTP requests,Custom,TCP,443
