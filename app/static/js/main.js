@@ -47,6 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize detection mode dropdown
     initDetectionModeDropdown();
     
+    // Initialize IPS toggle
+    initIPSToggle();
+    
     // Chỉ init charts nếu element tồn tại (tránh lỗi ở trang login)
     if(document.getElementById('sysChart')) {
         initCharts();
@@ -96,7 +99,19 @@ async function loadUserInfo() {
             
             const thresh = data.config_threshold || 2;
             document.getElementById('threshSlider').value = thresh;
-            document.getElementById('thresh-display').textContent = thresh + '/6';
+            document.getElementById('thresh-display').textContent = thresh;
+            
+            // Update IPS toggle
+            const ipsToggle = document.getElementById('ipsToggle');
+            const ipsStatus = document.getElementById('ipsStatus');
+            if (ipsToggle) {
+                const ipsEnabled = data.ips_enabled !== false; // Default to true
+                ipsToggle.checked = ipsEnabled;
+                if (ipsStatus) {
+                    ipsStatus.textContent = ipsEnabled ? 'Enabled' : 'Disabled';
+                    ipsStatus.style.color = ipsEnabled ? '#22c55e' : '#ef4444';
+                }
+            }
         }
 
     } catch (e) { console.error("Auth Error", e); }
@@ -198,10 +213,67 @@ async function updateProfile() {
     } catch(e) { alert("Error"); }
 }
 
+// Load user login history for profile page
+async function loadUserLoginHistory() {
+    const tbody = document.getElementById('loginHistoryBody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '<tr><td colspan="4" style="padding: 20px; text-align: center; color: var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>';
+    
+    try {
+        // Tận dụng endpoint /system-logs/logins với param current_user=true
+        const res = await fetch('/api/system-logs/logins?limit=50&current_user=true');
+        const data = await res.json();
+        
+        if (data.status === 'success' && data.logs.length > 0) {
+            tbody.innerHTML = data.logs.map(log => {
+                const time = log.timestamp ? new Date(log.timestamp).toLocaleString() : '-';
+                const action = log.action || '-';
+                const ip = log.ip_address || '-';
+                const status = log.status || 'unknown';
+                
+                // Status badge color
+                let statusClass = 'badge-safe';
+                let statusIcon = 'fa-check-circle';
+                if (status === 'failed') {
+                    statusClass = 'badge-danger';
+                    statusIcon = 'fa-times-circle';
+                } else if (status === 'logout') {
+                    statusClass = 'badge-warn';
+                    statusIcon = 'fa-sign-out-alt';
+                }
+                
+                return `
+                    <tr>
+                        <td style="padding: 10px 12px; font-size: 0.85em; color: var(--text-muted);">${time}</td>
+                        <td style="padding: 10px 12px; font-size: 0.85em;">
+                            <i class="fas ${action === 'login' ? 'fa-sign-in-alt' : 'fa-sign-out-alt'}" style="margin-right: 6px; color: var(--text-main);"></i>
+                            ${action.charAt(0).toUpperCase() + action.slice(1)}
+                        </td>
+                        <td style="padding: 10px 12px; font-size: 0.85em; font-family: monospace;">${ip}</td>
+                        <td style="padding: 10px 12px;">
+                            <span class="badge ${statusClass}">
+                                <i class="fas ${statusIcon}" style="margin-right: 4px;"></i>${status}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="4" style="padding: 20px; text-align: center; color: var(--text-muted);"><i class="fas fa-info-circle"></i> No login history found</td></tr>';
+        }
+    } catch (e) {
+        console.error('Load login history error:', e);
+        tbody.innerHTML = '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> Error loading history</td></tr>';
+    }
+}
+
 async function saveSystemSettings() {
     const modeSelector = document.getElementById('modeSelector');
     const mode = modeSelector ? modeSelector.value : 'voting';
     const thresh = document.getElementById('threshSlider').value;
+    const ipsToggle = document.getElementById('ipsToggle');
+    const ipsEnabled = ipsToggle ? ipsToggle.checked : true;
     
     try {
         await fetch('/api/update-settings', { 
@@ -209,11 +281,30 @@ async function saveSystemSettings() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ 
                 detection_mode: mode,
-                voting_threshold: thresh
+                voting_threshold: thresh,
+                ips_enabled: ipsEnabled
             })
         });
         alert("System config saved!");
     } catch(e) { alert("Error saving settings"); }
+}
+
+// IPS Toggle handler
+function initIPSToggle() {
+    const ipsToggle = document.getElementById('ipsToggle');
+    const ipsStatus = document.getElementById('ipsStatus');
+    
+    if (!ipsToggle || !ipsStatus) return;
+    
+    ipsToggle.addEventListener('change', function() {
+        if (this.checked) {
+            ipsStatus.textContent = 'Enabled';
+            ipsStatus.style.color = '#22c55e';
+        } else {
+            ipsStatus.textContent = 'Disabled';
+            ipsStatus.style.color = '#ef4444';
+        }
+    });
 }
 
 function onDetectionModeChange() {
@@ -288,6 +379,9 @@ function switchView(view) {
     }
     else if (view === 'incoming-files') {
         startFilesAutoRefresh();
+    }
+    else if (view === 'settings') {
+        loadUserLoginHistory();  // Load login history when switching to settings
     }
     else if (view === 'ips-database') {
         loadIPSSources();

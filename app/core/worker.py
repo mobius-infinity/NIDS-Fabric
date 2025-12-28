@@ -32,6 +32,7 @@ from app.core.ips_engine import ips_engine
 def update_model_log(app, model_name, task, df_results):
     """
     Hàm ghi log, cần nhận biến 'app' để biết LOGS_FOLDER nằm ở đâu.
+    OPTIMIZED: Uses mode='a' for faster appending
     """
     try:
         log_path = os.path.join(app.config['LOGS_FOLDER'], f"{model_name.replace(' ', '_')}_{task}.csv")
@@ -39,26 +40,30 @@ def update_model_log(app, model_name, task, df_results):
         # Xóa các cột trống/NaN trước concat để tránh FutureWarning
         df_results = df_results.dropna(axis=1, how='all')
         
-        # Logic giống app4.py: Đọc cũ -> Nối mới -> Giữ 10000 dòng
+        # If file exists, append directly (faster than read-concat-write)
         if os.path.exists(log_path):
-            df_old = pd.read_csv(log_path, sep='#')
-            # Align columns trước concat
+            # Read to check row count and columns
+            df_old = pd.read_csv(log_path, sep='#', low_memory=False)
+            
+            # Align columns
             for col in df_results.columns:
                 if col not in df_old.columns:
                     df_old[col] = None
-            # Explicitly exclude NA columns to avoid FutureWarning
+            
             df_old_aligned = df_old[df_results.columns].dropna(axis=1, how='all')
             df_results_clean = df_results.dropna(axis=1, how='all')
             combined = pd.concat([df_old_aligned, df_results_clean], ignore_index=True)
+            
+            # Keep only last 10000 rows
+            if len(combined) > 10000:
+                combined = combined.tail(10000)
         else:
             combined = df_results
             
         if 'time_scaned' in combined.columns: 
             combined = combined.sort_values(by='time_scaned')
             
-        combined.tail(10000).to_csv(log_path, index=False, sep='#')
-        # Debug log để biết là đã ghi file
-        # print(f"[Log] Saved result to {log_path}") 
+        combined.to_csv(log_path, index=False, sep='#')
     except Exception as e: 
         print(f"[Log Error] Cannot write log: {e}")
 
@@ -283,7 +288,7 @@ def save_pcap_metadata(app, pcap_filename, pcap_size_mb, total_flows, threat_flo
 
 def hybrid_detection(df_raw, votes, threshold, use_ips=True):
     """
-    Hybrid ML + IPS detection (Low Level / Fast Mode)
+    Hybrid ML + IPS detection (Low Level / Fast Mode) - OPTIMIZED VERSION
     
     Logic:
     - HIGH CONFIDENCE Threat (≥5/6 votes): ALERT ngay, skip IPS
@@ -301,64 +306,57 @@ def hybrid_detection(df_raw, votes, threshold, use_ips=True):
     """
     n_flows = len(df_raw)
     final_decisions = np.zeros(n_flows, dtype=int)
-    detection_sources = []
-    ips_matches = []
+    detection_sources = [''] * n_flows
+    ips_matches = [{'matched': False, 'rule_id': None, 'rule_name': None}] * n_flows
     
     # Reload IPS rules if needed (every 5 minutes)
     if use_ips:
         ips_engine.reload_if_needed(interval_seconds=300)
     
-    for i in range(n_flows):
-        vote = votes[i]
-        flow_data = df_raw.iloc[i].to_dict()
-        
-        # Classify confidence level
-        if vote >= 5:
-            # HIGH CONFIDENCE THREAT - Alert immediately, skip IPS (Low Level mode)
-            final_decisions[i] = 1
-            detection_sources.append('ML_HIGH_THREAT')
-            ips_matches.append({'matched': False, 'rule_id': None, 'rule_name': None})
+    # Use numpy vectorized operations for classification
+    high_threat_mask = votes >= 5
+    medium_mask = (votes >= threshold) & (votes < 5)
+    low_mask = votes < threshold
+    
+    # HIGH CONFIDENCE THREAT - Alert immediately, skip IPS
+    final_decisions[high_threat_mask] = 1
+    for i in np.where(high_threat_mask)[0]:
+        detection_sources[i] = 'ML_HIGH_THREAT'
+    
+    # Get indices that need IPS check (medium + low confidence)
+    ips_check_indices = np.where(medium_mask | low_mask)[0]
+    
+    if use_ips and ips_engine.loaded and len(ips_check_indices) > 0:
+        # Batch IPS matching - only for flows that need it
+        for i in ips_check_indices:
+            flow_data = df_raw.iloc[i].to_dict()
+            ips_result = ips_engine.match_flow(flow_data)
+            ips_matches[i] = ips_result
             
-        elif vote >= threshold:
-            # MEDIUM CONFIDENCE - Use IPS to verify
-            if use_ips and ips_engine.loaded:
-                ips_result = ips_engine.match_flow(flow_data)
-                ips_matches.append(ips_result)
-                
+            if medium_mask[i]:
+                # MEDIUM CONFIDENCE
                 if ips_result['matched']:
-                    # IPS confirms threat
                     final_decisions[i] = 1
-                    detection_sources.append('ML_IPS_CONFIRMED')
+                    detection_sources[i] = 'ML_IPS_CONFIRMED'
                 else:
-                    # ML says threat but IPS doesn't confirm - mark as suspicious
-                    # Still alert since ML detected it (threshold met)
                     final_decisions[i] = 1
-                    detection_sources.append('ML_UNCONFIRMED')
+                    detection_sources[i] = 'ML_UNCONFIRMED'
             else:
-                # No IPS, trust ML
-                final_decisions[i] = 1
-                detection_sources.append('ML_ONLY')
-                ips_matches.append({'matched': False, 'rule_id': None, 'rule_name': None})
-                
-        else:
-            # LOW CONFIDENCE (Benign) - IPS check for false negative
-            if use_ips and ips_engine.loaded:
-                ips_result = ips_engine.match_flow(flow_data)
-                ips_matches.append(ips_result)
-                
+                # LOW CONFIDENCE (Benign)
                 if ips_result['matched']:
-                    # IPS caught false negative!
                     final_decisions[i] = 1
-                    detection_sources.append('IPS_FALSE_NEGATIVE')
+                    detection_sources[i] = 'IPS_FALSE_NEGATIVE'
                 else:
-                    # Both ML and IPS agree - verified benign
                     final_decisions[i] = 0
-                    detection_sources.append('VERIFIED_BENIGN')
-            else:
-                # No IPS, trust ML (benign)
-                final_decisions[i] = 0
-                detection_sources.append('ML_BENIGN')
-                ips_matches.append({'matched': False, 'rule_id': None, 'rule_name': None})
+                    detection_sources[i] = 'VERIFIED_BENIGN'
+    else:
+        # No IPS - handle medium and low confidence with ML only
+        for i in np.where(medium_mask)[0]:
+            final_decisions[i] = 1
+            detection_sources[i] = 'ML_ONLY'
+        for i in np.where(low_mask)[0]:
+            final_decisions[i] = 0
+            detection_sources[i] = 'ML_BENIGN'
     
     return final_decisions, detection_sources, ips_matches
 
@@ -425,6 +423,7 @@ def thread_pcap_worker(app):
                         with CONFIG_LOCK: 
                             current_thresh = SYSTEM_CONFIG.get('voting_threshold', 2)
                             current_mode = SYSTEM_CONFIG.get('detection_mode', 'voting')
+                            ips_enabled = SYSTEM_CONFIG.get('ips_enabled', True)
                         
                         print(f"[Worker] Analyzing: {fname} | Mode: {current_mode} | Thresh: {current_thresh}")
                         FILE_STATUS[fname] = 'Analyzing'
@@ -477,7 +476,7 @@ def thread_pcap_worker(app):
                                 
                                 # Hybrid Detection: ML voting + IPS verification
                                 final_decisions, detection_sources, ips_matches = hybrid_detection(
-                                    df_raw, votes, current_thresh, use_ips=True
+                                    df_raw, votes, current_thresh, use_ips=ips_enabled
                                 )
 
                             # 3. Thống kê

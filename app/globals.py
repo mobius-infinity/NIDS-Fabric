@@ -15,7 +15,8 @@ REALTIME_HISTORY = { 'timestamps': [], 'cpu': [], 'ram': [], 'flows_per_sec': []
 GLOBAL_THREAT_STATS = { 'total_attacks': 0, 'total_safe': 0 }
 SYSTEM_CONFIG = {
     'detection_mode': 'voting', 
-    'voting_threshold': 2
+    'voting_threshold': 2,
+    'ips_enabled': True
 }
 
 # PCAP Metadata Cache (loaded on startup)

@@ -317,52 +317,100 @@
                     </form>
                 </div>
             </div>
+            
+            <!-- Login History Card -->
+            <div class="card widget-wide">
+                <div class="card-header">
+                    <span><i class="fas fa-history"></i> Login History</span>
+                    <button class="btn" style="padding: 4px 10px; font-size: 0.8em;" onclick="loadUserLoginHistory()">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <div class="card-body" style="padding: 0; max-height: 400px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 1;">
+                            <tr>
+                                <th style="padding: 10px 12px; text-align: left; font-size: 0.85em;">Time</th>
+                                <th style="padding: 10px 12px; text-align: left; font-size: 0.85em;">Action</th>
+                                <th style="padding: 10px 12px; text-align: left; font-size: 0.85em;">IP Address</th>
+                                <th style="padding: 10px 12px; text-align: left; font-size: 0.85em;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="loginHistoryBody">
+                            <tr>
+                                <td colspan="4" style="padding: 20px; text-align: center; color: var(--text-muted);">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
         
         <div style="height: 32px;"></div>
         
-        <h2 style="margin-bottom: 24px; color: var(--text-main); margin-top: 40px; padding-top: 24px; border-top: 2px solid var(--border-color);">System Configuration</h2>
-        <div class="dashboard-grid">
-            <div class="card widget-wide">
-                <div class="card-header"><i class="fas fa-brain"></i> Detection Mode</div>
-                <div class="card-body">
-                    <div class="setting-group" style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+        <h2 style="margin-bottom: 24px; color: var(--text-main); margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--border-color);">System Configuration</h2>
+        
+        <div class="card">
+            <div class="card-header">Detection Settings</div>
+            <div class="card-body" style="padding: 0;">
+                <!-- IPS Engine Row -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border-color);">
+                    <div>
+                        <div style="font-weight: 600; font-size: 0.95em; margin-bottom: 3px;">IPS Engine</div>
+                        <div style="font-size: 0.8em; color: var(--text-muted);">TLS Fingerprint detection (JA3, JA3S, SNI)</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span id="ipsStatus" style="font-weight: 500; font-size: 0.9em; color: var(--text-muted);">Enabled</span>
+                        <label class="switch">
+                            <input type="checkbox" id="ipsToggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Detection Mode Row -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border-color);">
+                    <div>
+                        <div style="font-weight: 600; font-size: 0.95em; margin-bottom: 3px;">Detection Mode</div>
+                        <div style="font-size: 0.8em; color: var(--text-muted);">ML model ensemble strategy</div>
+                    </div>
+                    <select id="modeSelector" style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.85em; background: var(--bg-secondary); color: var(--text-body); cursor: pointer; min-width: 180px;" onchange="onDetectionModeChange()">
+                        <option value="voting">Voting Mode (6 Models)</option>
+                        <option value="rf_only">RF Only (Fast)</option>
+                    </select>
+                </div>
+                
+                <!-- Voting Threshold Row -->
+                <div id="thresholdContainer" style="padding: 16px 24px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
                         <div>
-                            <div style="font-weight: 600; font-size: 1.1em; margin-bottom: 8px;">Detection Mode Selection</div>
-                            <div style="font-size: 0.9em; color: #64748b; line-height: 1.6;">
-                                <div><strong style="color: var(--text-main);">Voting Mode:</strong> Ensemble consensus from 6 models (RF, LightGBM, DNN × binary/multiclass).</div>
-                                <div style="margin-top: 8px;"><strong style="color: var(--text-main);">RF Only Mode:</strong> Fast single-model detection using Random Forest only.</div>
-                            </div>
+                            <div style="font-weight: 600; font-size: 0.95em; margin-bottom: 3px;">Voting Threshold</div>
+                            <div style="font-size: 0.8em; color: var(--text-muted);">Minimum votes to classify as threat (out of 6)</div>
                         </div>
-                        <div style="display: flex; flex-direction: column; gap: 16px; min-width: 280px;">
-                            <div style="display: flex; flex-direction: column; gap: 8px;">
-                                <label style="font-weight: 600; font-size: 0.95em;">Select Mode:</label>
-                                <select id="modeSelector" style="padding: 10px 12px; border: 2px solid var(--border-color); border-radius: 6px; font-size: 0.95em; background: var(--bg-secondary); color: var(--text-main); cursor: pointer; transition: all 0.2s;" onchange="onDetectionModeChange()">
-                                    <option value="voting">Voting Mode (Recommended)</option>
-                                    <option value="rf_only">RF Only Mode (Fast)</option>
-                                </select>
-                            </div>
-                            
-                            <div id="thresholdContainer" style="display: flex; flex-direction: column; gap: 8px; animation: slideDown 0.3s ease;">
-                                <div style="display: flex; align-items: center; justify-content: space-between;">
-                                    <label style="font-weight: 600; font-size: 0.95em;">Voting Threshold:</label>
-                                    <span id="thresh-display" style="font-weight: 800; font-size: 1.3em; color: #3b82f6;">2/6</span>
-                                </div>
-                                <input type="range" id="threshSlider" min="1" max="6" value="2" style="width: 100%; height: 6px; border-radius: 3px; background: var(--border-color); outline: none; -webkit-appearance: none; cursor: pointer;" oninput="document.getElementById('thresh-display').textContent = this.value + '/6'">
-                                <div style="font-size: 0.85em; color: #64748b; display: flex; justify-content: space-between; margin-top: 4px;">
-                                    <span>Strict (1)</span>
-                                    <span>Balanced (2-4)</span>
-                                    <span>Conservative (6)</span>
-                                </div>
-                            </div>
+                        <div style="text-align: center; min-width: 50px;">
+                            <span id="thresh-display" style="font-weight: 700; font-size: 1.3em; color: var(--text-main);">2</span>
+                            <span style="font-size: 0.8em; color: var(--text-muted);">/6</span>
                         </div>
                     </div>
-
-                    <div style="text-align: right; margin-top: 24px;">
-                        <button class="btn btn-primary" onclick="saveSystemSettings()"><i class="fas fa-save"></i> Apply Configuration</button>
+                    <input type="range" id="threshSlider" min="1" max="6" value="2" 
+                           style="width: 100%; height: 6px; border-radius: 3px; background: var(--border-color); outline: none; -webkit-appearance: none; cursor: pointer;" 
+                           oninput="document.getElementById('thresh-display').textContent = this.value">
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.75em; color: var(--text-muted);">
+                        <span>Sensitive (1)</span>
+                        <span>Balanced (3)</span>
+                        <span>Conservative (6)</span>
                     </div>
                 </div>
             </div>
+        </div>
+        
+        <!-- Apply Configuration Button -->
+        <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
+            <button class="btn btn-primary" onclick="saveSystemSettings()" style="padding: 10px 24px; font-size: 0.9em;">
+                <i class="fas fa-save"></i> Apply Configuration
+            </button>
         </div>
     </div>
 

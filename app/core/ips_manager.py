@@ -281,7 +281,7 @@ class IPSRulesManager:
             # Xóa tất cả rules của source này
             rules_deleted = 0
             if os.path.exists(self.rules_path):
-                df_rules = pd.read_csv(self.rules_path, sep='#')
+                df_rules = pd.read_csv(self.rules_path, sep='#', low_memory=False)
                 original_rules = len(df_rules)
                 
                 # Check if source_id column exists
@@ -380,7 +380,7 @@ class IPSRulesManager:
             if not os.path.exists(self.rules_path):
                 return []
             
-            df = pd.read_csv(self.rules_path, sep='#')
+            df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             
             # Replace NaN with empty string for JSON serialization
             df = df.fillna('')
@@ -403,7 +403,7 @@ class IPSRulesManager:
             if not os.path.exists(self.rules_path):
                 return None
             
-            df = pd.read_csv(self.rules_path, sep='#')
+            df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             # Replace NaN with empty string
             df = df.fillna('')
             
@@ -422,7 +422,7 @@ class IPSRulesManager:
             if not os.path.exists(self.rules_path):
                 return []
             
-            df = pd.read_csv(self.rules_path, sep='#')
+            df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             # Replace NaN with empty string
             df = df.fillna('')
             
@@ -444,7 +444,7 @@ class IPSRulesManager:
             if not os.path.exists(self.rules_path):
                 df = pd.DataFrame([rule_data])
             else:
-                df = pd.read_csv(self.rules_path, sep='#')
+                df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
                 df = pd.concat([df, pd.DataFrame([rule_data])], ignore_index=True)
             
             df.to_csv(self.rules_path, sep='#', index=False)
@@ -459,7 +459,7 @@ class IPSRulesManager:
             if not os.path.exists(self.rules_path):
                 return []
             
-            df = pd.read_csv(self.rules_path, sep='#')
+            df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             return df[df['severity'] == severity].to_dict('records')
         except Exception as e:
             print(f"[IPS Manager] Error filtering by severity: {e}")
@@ -471,7 +471,7 @@ class IPSRulesManager:
             if not os.path.exists(self.rules_path):
                 return []
             
-            df = pd.read_csv(self.rules_path, sep='#')
+            df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             return df[df['category'] == category].to_dict('records')
         except Exception as e:
             print(f"[IPS Manager] Error filtering by category: {e}")
@@ -490,7 +490,7 @@ class IPSRulesManager:
                     'categories': []
                 }
             
-            df = pd.read_csv(self.rules_path, sep='#')
+            df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             
             return {
                 'total_rules': len(df),
@@ -522,7 +522,7 @@ class IPSRulesManager:
             
             # Đọc rules hiện tại
             if os.path.exists(self.rules_path):
-                df_existing = pd.read_csv(self.rules_path, sep='#')
+                df_existing = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             else:
                 df_existing = pd.DataFrame()
             
@@ -748,7 +748,7 @@ class IPSRulesManager:
             
             # Đọc rules hiện tại
             if os.path.exists(self.rules_path):
-                df_existing = pd.read_csv(self.rules_path, sep='#')
+                df_existing = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             else:
                 df_existing = pd.DataFrame()
             
@@ -831,7 +831,7 @@ class IPSRulesManager:
             
             # Load existing rules
             if os.path.exists(self.rules_path):
-                df = pd.read_csv(self.rules_path, sep='#')
+                df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             else:
                 df = pd.DataFrame()
             
@@ -863,7 +863,7 @@ class IPSRulesManager:
             if not os.path.exists(self.rules_path):
                 return False
             
-            df = pd.read_csv(self.rules_path, sep='#')
+            df = pd.read_csv(self.rules_path, sep='#', low_memory=False)
             df = df[df['rule_id'] != rule_id]
             df.to_csv(self.rules_path, sep='#', index=False)
             return True

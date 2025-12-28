@@ -176,157 +176,42 @@ class IPSEngine:
         """
         Check if flow matches a specific rule.
         
-        STRICT MATCHING: Only match if rule has specific indicators that 
-        can be verified against flow metadata. We support:
-        - Known malicious ports (not common ports like 80, 443)
-        - TLS Fingerprint (JA3/JA3S) - HIGHEST priority
-        - MD5/SHA256 hash matching
-        - Specific protocol + port combinations
+        TLS FINGERPRINT ONLY MATCHING:
+        - JA3 Client Hash - malicious client TLS fingerprint
+        - JA3S Server Hash - malicious server TLS fingerprint  
+        - SNI (Server Name Indication) - malicious domain names
+        
+        NO PORT-BASED MATCHING to reduce false positives.
         """
         try:
-            # Get rule attributes
-            rule_proto = rule.get('protocol', '')
-            rule_port = rule.get('port', '')
-            severity = str(rule.get('severity', '')).lower()
-            category = str(rule.get('category', '')).lower()
-            rule_name = str(rule.get('rule_name', '')).lower()
-            
             # TLS Fingerprint fields from rule
             rule_ja3 = str(rule.get('ja3', '')).strip().lower()
             rule_ja3s = str(rule.get('ja3s', '')).strip().lower()
-            rule_md5 = str(rule.get('md5', '')).strip().lower()
-            rule_hash = str(rule.get('hash', '')).strip().lower()
             rule_sni = str(rule.get('sni', '')).strip().lower()
             
-            # === PRIORITY 1: TLS FINGERPRINT MATCHING (HIGHEST CONFIDENCE) ===
-            # JA3 Client Fingerprint - malicious client TLS fingerprint
+            # === PRIORITY 1: JA3 CLIENT FINGERPRINT ===
+            # Matches malicious client TLS handshake patterns
             if rule_ja3 and rule_ja3 not in ['', 'nan', 'none']:
                 if flow_ja3 and flow_ja3.lower() == rule_ja3:
                     return {'matched': True, 'match_type': 'JA3'}
-                # If rule requires JA3 but flow doesn't have it, skip this rule
-                if not flow_ja3:
-                    return {'matched': False, 'match_type': None}
             
-            # JA3S Server Fingerprint - malicious server TLS fingerprint  
+            # === PRIORITY 2: JA3S SERVER FINGERPRINT ===
+            # Matches malicious server TLS handshake patterns
             if rule_ja3s and rule_ja3s not in ['', 'nan', 'none']:
                 if flow_ja3s and flow_ja3s.lower() == rule_ja3s:
                     return {'matched': True, 'match_type': 'JA3S'}
-                if not flow_ja3s:
-                    return {'matched': False, 'match_type': None}
             
-            # === PRIORITY 2: MD5/HASH MATCHING ===
-            # Check if rule has MD5 hash (for content matching - limited without DPI)
-            if rule_md5 and rule_md5 not in ['', 'nan', 'none']:
-                # We can't do content MD5 matching without DPI
-                # Skip rules that require content hash
-                return {'matched': False, 'match_type': None}
-            
-            if rule_hash and rule_hash not in ['', 'nan', 'none']:
-                # Same for generic hash
-                return {'matched': False, 'match_type': None}
-            
-            # === PRIORITY 3: SNI (Server Name Indication) MATCHING ===
+            # === PRIORITY 3: SNI (SERVER NAME INDICATION) ===
+            # Matches malicious domain names in TLS handshake
             if rule_sni and rule_sni not in ['', 'nan', 'none']:
-                if flow_sni and rule_sni in flow_sni.lower():
-                    return {'matched': True, 'match_type': 'SNI'}
-                return {'matched': False, 'match_type': None}
+                if flow_sni:
+                    # Support both exact match and partial match (subdomain)
+                    flow_sni_lower = flow_sni.lower()
+                    if rule_sni == flow_sni_lower or flow_sni_lower.endswith('.' + rule_sni):
+                        return {'matched': True, 'match_type': 'SNI'}
             
-            # Skip rules that require payload inspection (we can't do that)
-            # These categories typically need content matching
-            payload_inspection_keywords = [
-                'shellcode', 'exploit', 'overflow', 'injection',
-                'xss', 'sql', 'rce', 'rfi', 'lfi', 'traversal',
-                'command', 'code execution', 'arbitrary'
-            ]
-            for keyword in payload_inspection_keywords:
-                if keyword in category or keyword in rule_name:
-                    # Can't match without payload - skip
-                    return {'matched': False, 'match_type': None}
-            
-            # Common ports that should NOT trigger alerts on their own
-            common_safe_ports = {
-                20, 21,    # FTP (legitimate)
-                22,        # SSH (legitimate)  
-                23,        # Telnet (legitimate in some networks)
-                25, 465, 587,  # SMTP
-                53,        # DNS
-                80, 443,   # HTTP/HTTPS
-                110, 995,  # POP3
-                143, 993,  # IMAP
-                389, 636,  # LDAP
-                3306,      # MySQL
-                5432,      # PostgreSQL
-                8080, 8443,  # Alt HTTP
-            }
-            
-            # Get flow ports
-            flow_ports = set()
-            try:
-                if flow_src_port:
-                    flow_ports.add(int(flow_src_port))
-                if flow_dst_port:
-                    flow_ports.add(int(flow_dst_port))
-            except:
-                pass
-            
-            # 1. Protocol check (required)
-            if rule_proto and str(rule_proto).lower() not in ['any', 'nan', '', 'ip']:
-                rule_proto_num = self._proto_to_num(rule_proto)
-                if rule_proto_num is not None:
-                    try:
-                        if int(flow_proto) != rule_proto_num:
-                            return {'matched': False, 'match_type': None}
-                    except:
-                        return {'matched': False, 'match_type': None}
-            
-            # 2. Port check
-            rule_ports = None
-            if rule_port and str(rule_port).lower() not in ['any', 'nan', '']:
-                rule_ports = self._parse_ports(rule_port)
-            
-            # 3. Strict matching logic
-            # Only match if we have HIGH CONFIDENCE indicators
-            
-            # Category-based strict matching
-            if 'scan' in category or 'reconnaissance' in category:
-                # Port scanning - only match if targeting unusual ports
-                # or if we detect port sweep patterns (can't detect here)
-                return {'matched': False, 'match_type': None}  # Disable - needs behavioral analysis
-            
-            if 'dos' in category or 'ddos' in category:
-                # DoS detection needs rate/volume analysis
-                return {'matched': False, 'match_type': None}  # Disable - needs traffic analysis
-            
-            if 'trojan' in category or 'malware' in category or 'backdoor' in category:
-                # These need known malicious port matching
-                if rule_ports:
-                    # Only match if rule specifies non-common ports
-                    malicious_ports = rule_ports - common_safe_ports
-                    if malicious_ports and flow_ports.intersection(malicious_ports):
-                        return {'matched': True, 'match_type': 'PORT'}
-                return {'matched': False, 'match_type': None}
-            
-            if 'c2' in category or 'cnc' in category or 'command and control' in category:
-                # C2 traffic on unusual ports
-                if rule_ports:
-                    malicious_ports = rule_ports - common_safe_ports
-                    if malicious_ports and flow_ports.intersection(malicious_ports):
-                        return {'matched': True, 'match_type': 'PORT'}
-                return {'matched': False, 'match_type': None}
-            
-            if 'policy' in category or 'inappropriate' in category:
-                # Policy violations - usually not critical
-                return {'matched': False, 'match_type': None}
-            
-            # Default: Only match Critical/High severity with specific unusual ports
-            if severity in ['critical', 'high']:
-                if rule_ports:
-                    # Must match unusual port
-                    unusual_ports = rule_ports - common_safe_ports
-                    if unusual_ports and flow_ports.intersection(unusual_ports):
-                        return {'matched': True, 'match_type': 'PORT'}
-            
-            # Default: Don't match
+            # No match - rule doesn't have TLS fingerprint indicators
+            # or flow doesn't match any TLS fingerprint
             return {'matched': False, 'match_type': None}
             
         except Exception as e:

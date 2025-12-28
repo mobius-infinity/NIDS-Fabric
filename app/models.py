@@ -12,3 +12,4 @@ class SystemSettings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     detection_mode = db.Column(db.String(50), default='voting')
     voting_threshold = db.Column(db.Integer, default=2)
+    ips_enabled = db.Column(db.Boolean, default=True)

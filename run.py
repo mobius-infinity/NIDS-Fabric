@@ -33,9 +33,10 @@ def init_db_data(app):
         if setting:
             SYSTEM_CONFIG['detection_mode'] = setting.detection_mode
             SYSTEM_CONFIG['voting_threshold'] = setting.voting_threshold
-            print(f"[System] Config Loaded: Mode={setting.detection_mode}")
+            SYSTEM_CONFIG['ips_enabled'] = setting.ips_enabled if setting.ips_enabled is not None else True
+            print(f"[System] Config Loaded: Mode={setting.detection_mode}, IPS={'Enabled' if SYSTEM_CONFIG['ips_enabled'] else 'Disabled'}")
         else:
-            new_setting = SystemSettings(detection_mode='voting', voting_threshold=2)
+            new_setting = SystemSettings(detection_mode='voting', voting_threshold=2, ips_enabled=True)
             db.session.add(new_setting)
             db.session.commit()
         

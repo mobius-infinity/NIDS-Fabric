@@ -42,7 +42,8 @@ def get_user_info():
             "avatar": current_user.avatar_file,
             "theme": current_user.theme_preference,
             "config_mode": SYSTEM_CONFIG.get('detection_mode'),
-            "config_threshold": SYSTEM_CONFIG.get('voting_threshold', 2)
+            "config_threshold": SYSTEM_CONFIG.get('voting_threshold', 2),
+            "ips_enabled": SYSTEM_CONFIG.get('ips_enabled', True)
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -90,6 +91,8 @@ def update_settings():
             setting.detection_mode = data['detection_mode']
         if 'voting_threshold' in data: 
             setting.voting_threshold = int(data['voting_threshold'])
+        if 'ips_enabled' in data:
+            setting.ips_enabled = bool(data['ips_enabled'])
         
         db.session.commit()
         
@@ -99,6 +102,8 @@ def update_settings():
                 SYSTEM_CONFIG['detection_mode'] = data['detection_mode']
             if 'voting_threshold' in data: 
                 SYSTEM_CONFIG['voting_threshold'] = int(data['voting_threshold'])
+            if 'ips_enabled' in data:
+                SYSTEM_CONFIG['ips_enabled'] = bool(data['ips_enabled'])
                 
         return jsonify({"status": "success"})
     except Exception as e: 
@@ -1757,13 +1762,24 @@ def get_api_logs():
 @api_bp.route('/system-logs/logins')
 @login_required
 def get_login_logs():
-    """Get user login logs"""
+    """Get user login logs - supports filtering by username"""
     try:
         from app.core.system_logger import get_system_logger
         logger = get_system_logger()
         
         limit = request.args.get('limit', 100, type=int)
-        logs = logger.get_login_logs(limit=limit)
+        username_filter = request.args.get('username', '').strip()
+        current_user_only = request.args.get('current_user', '').lower() == 'true'
+        
+        logs = logger.get_login_logs(limit=limit * 5 if username_filter or current_user_only else limit)
+        
+        # Filter by specific username or current user
+        if current_user_only:
+            logs = [log for log in logs if log.get('username') == current_user.username][:limit]
+        elif username_filter:
+            logs = [log for log in logs if log.get('username') == username_filter][:limit]
+        else:
+            logs = logs[:limit]
         
         return jsonify({
             'status': 'success',
