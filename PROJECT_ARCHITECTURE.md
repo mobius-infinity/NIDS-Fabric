@@ -187,8 +187,8 @@ graph TD
 ```mermaid
 graph TD
     A["Input: votes 0-6"] --> B["Calculate masks"]
-    B --> B1["high_threat_mask = votes >= 5"]
-    B --> B2["medium_mask = votes >= threshold AND < 5"]
+    B --> B1["high_threat_mask = votes >= 6"]
+    B --> B2["medium_mask = threshold <= votes < 6"]
     B --> B3["low_mask = votes < threshold"]
     
     B1 --> C["Process HIGH THREAT"]
@@ -221,6 +221,88 @@ graph TD
     style E fill:#3b82f6
     style F fill:#10b981
 ```
+
+---
+
+## 5.1 HYBRID DETECTION LOGIC - DETAILED EXPLANATION
+
+### Decision Matrix
+
+The hybrid detection system makes decisions based on ML voting count and configurable threshold:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ HYBRID DETECTION DECISION MATRIX                                  │
+├──────────┬──────────────┬────────────────┬───────────────────────┤
+│ Votes    │ Process Path │ IPS Check?     │ Possible Results      │
+├──────────┼──────────────┼────────────────┼───────────────────────┤
+│ 6/6      │ HIGH_THREAT  │ ❌ Skip        │ ALERT (always)        │
+│          │              │                │ Source: ML_HIGH_THREAT│
+├──────────┼──────────────┼────────────────┼───────────────────────┤
+│ T ≤ V<6  │ MEDIUM       │ ✅ Check       │ • ALERT + CONFIRMED   │
+│          │              │                │   (if IPS matches)    │
+│          │              │                │   Source: ML_IPS_CONF │
+│          │              │                │ • ALERT + UNCONFIRMED │
+│          │              │                │   (if no IPS match)   │
+│          │              │                │   Source: ML_UNCONF   │
+├──────────┼──────────────┼────────────────┼───────────────────────┤
+│ V < T    │ LOW          │ ✅ Check       │ • ALERT (false neg)   │
+│          │              │                │   (if IPS matches)    │
+│          │              │                │   Source: IPS_FALSE_NEG
+│          │              │                │ • BENIGN (verified)   │
+│          │              │                │   (if no match)       │
+│          │              │                │   Source: VERIFIED_BENIGN
+└──────────┴──────────────┴────────────────┴───────────────────────┘
+
+(Where T = threshold, V = votes)
+```
+
+### Example Scenarios
+
+**Scenario 1: Threshold = 4, Flow with 5/6 votes**
+```
+5 >= 4 (threshold) AND 5 < 6 → MEDIUM
+→ IPS check required
+  • If JA3/JA3S/SNI matches known malware → ATTACK (ML_IPS_CONFIRMED)
+  • If no IPS match → ATTACK (ML_UNCONFIRMED)
+```
+
+**Scenario 2: Threshold = 6, Flow with 5/6 votes**
+```
+5 < 6 (threshold) → LOW
+→ IPS check required (catches false negatives)
+  • If IPS matches → ATTACK (IPS_FALSE_NEGATIVE)
+  • If no IPS match → BENIGN (VERIFIED_BENIGN)
+```
+
+**Scenario 3: Threshold = 2, Flow with 1/6 votes**
+```
+1 < 2 (threshold) → LOW
+→ IPS check required
+  • If IPS matches → ATTACK (IPS_FALSE_NEGATIVE) - caught by signature
+  • If no IPS match → BENIGN (VERIFIED_BENIGN) - safe
+```
+
+### Threshold Tuning Guide
+
+| Threshold | Sensitivity | Use Case | Behavior |
+|-----------|-------------|----------|----------|
+| **1-2** | High | Sensitive environments | Even 1 vote → IPS check, many alerts |
+| **3-4** | Medium | ⭐ **Recommended** | Balanced approach, good precision |
+| **5** | Low | Conservative | Only 5-6 votes → HIGH/MEDIUM |
+| **6** | Very Low | Extreme precision | Only 6/6 skip IPS, all others check |
+
+### Key Properties
+
+✅ **Threshold is always respected:** All flows below threshold go through IPS check (no bypassing)
+
+✅ **IPS confirms detections:** MEDIUM flows always need IPS confirmation despite high ML votes
+
+✅ **False negative protection:** LOW process catches ML misses by checking IPS signatures
+
+✅ **Configurable precision:** Adjust threshold (1-6) to change detection behavior without code changes
+
+✅ **Threshold = 6 special case:** Only 6/6 votes (100% consensus) skip IPS, all others verify
 
 ---
 

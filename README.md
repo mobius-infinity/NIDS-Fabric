@@ -70,13 +70,22 @@ All machine learning models are trained in-house by the project team.
 
 ### Consensus voting strategy
 
-All 6 models vote simultaneously. The system uses configurable thresholds (1-6 votes) to classify flows:
+All 6 models vote simultaneously. The system uses configurable thresholds (1-6 votes) with dynamic detection logic:
 
-**High confidence:** 5 or more votes trigger immediate alert, skipping IPS verification
+**HIGH CONFIDENCE (votes >= 6):** Alert immediately, skip IPS verification (only when 6/6 models agree)
 
-**Medium confidence:** Votes meet threshold but below 5, triggering IPS verification to confirm or deny
+**MEDIUM CONFIDENCE (threshold <= votes < 6):** IPS verification required
+- If IPS matches → ML_IPS_CONFIRMED (attack confirmed by signature)
+- If IPS no match → ML_UNCONFIRMED (suspicious but no known signature)
 
-**Low confidence:** Fewer votes than threshold, allowing IPS to catch false negatives
+**LOW CONFIDENCE (votes < threshold):** IPS verification to catch false negatives
+- If IPS matches → IPS_FALSE_NEGATIVE (ML missed, IPS caught)
+- If IPS no match → VERIFIED_BENIGN (confirmed safe by both systems)
+
+Threshold (1-6) controls decision boundary:
+- **Threshold=1:** Most sensitive (even 1 vote goes to MEDIUM/LOW + IPS check)
+- **Threshold=4:** Balanced (requires 4+ votes to skip IPS for most flows)
+- **Threshold=6:** Most strict (only 6/6 votes skip IPS, all others verify)
 
 ## Project Architecture
 

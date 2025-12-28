@@ -294,11 +294,11 @@ def hybrid_detection(df_raw, votes, threshold, use_ips=True):
     Hybrid ML + IPS detection (Low Level / Fast Mode) - OPTIMIZED VERSION
     
     Logic:
-    - HIGH CONFIDENCE Threat (≥5/6 votes): ALERT ngay, skip IPS
-    - MEDIUM (votes >= threshold nhưng < 5): IPS verify
+    - HIGH CONFIDENCE Threat (votes >= 6): ALERT ngay, skip IPS
+    - MEDIUM (threshold <= votes < 6): IPS verify
         - IPS match → ALERT (confirmed)
         - IPS no match → SUSPICIOUS
-    - LOW Benign (< threshold): IPS check for false negative
+    - LOW Benign (votes < threshold): IPS check for false negative
         - IPS match → ALERT (false negative caught)
         - IPS no match → ALLOW (verified benign)
     
@@ -317,8 +317,8 @@ def hybrid_detection(df_raw, votes, threshold, use_ips=True):
         ips_engine.reload_if_needed(interval_seconds=300)
     
     # Use numpy vectorized operations for classification
-    high_threat_mask = votes >= 5
-    medium_mask = (votes >= threshold) & (votes < 5)
+    high_threat_mask = (votes >= 6) & (votes >= threshold)
+    medium_mask = (votes >= threshold) & (votes < 6)
     low_mask = votes < threshold
     
     # HIGH CONFIDENCE THREAT - Alert immediately, skip IPS
