@@ -455,11 +455,11 @@ def thread_pcap_worker(app):
                             ips_matches = []
                             
                             if current_mode == 'rf_only':
-                                model, scaler, _, _ = model_cache.get_model('Random Forest', 'binary')
+                                model, scaler, _, _ = model_cache.get_model('DNN', 'binary')
                                 if model: 
-                                    final_decisions = get_binary_prediction_vector(df_raw, model, scaler, 'rf', FEATURES_DNN_RF)
-                                    votes = final_decisions.astype(int)  # RF only = 0 or 1 vote
-                                    detection_sources = ['RF_ONLY'] * len(df_raw)
+                                    final_decisions = get_binary_prediction_vector(df_raw, model, scaler, 'dnn', FEATURES_DNN_RF)
+                                    votes = final_decisions.astype(int)  # DNN only = 0 or 1 vote
+                                    detection_sources = ['DNN_ONLY'] * len(df_raw)
                                     ips_matches = [{'matched': False, 'rule_id': None, 'rule_name': None}] * len(df_raw)
                                 else:
                                     final_decisions = np.zeros(len(df_raw))
@@ -472,7 +472,7 @@ def thread_pcap_worker(app):
                                     if model:
                                         vec = get_binary_prediction_vector(df_raw, model, scaler, mtype, feats)
                                         if len(vec) == len(votes): 
-                                            votes += vec
+                                            votes += vec # Get flows vote from each model for each loop
                                 
                                 # Hybrid Detection: ML voting + IPS verification
                                 final_decisions, detection_sources, ips_matches = hybrid_detection(

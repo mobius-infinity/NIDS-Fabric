@@ -1,5 +1,20 @@
 # NIDS Fabric - Project Architecture (Mermaid Diagrams)
 
+## Table of Contents
+
+1. [Application Startup Flow](#1-application-startup-flow)
+2. [PCAP Analysis Pipeline](#2-pcap-analysis-pipeline)
+3. [ML Engine - Model Cache System](#3-ml-engine---model-cache-system)
+4. [IPS Engine - TLS Fingerprint Matching](#4-ips-engine---tls-fingerprint-matching)
+5. [Hybrid Detection Logic](#5-hybrid-detection-logic)
+6. [API Layer - Endpoints](#6-api-layer---endpoints)
+7. [Storage Structure](#7-storage-structure)
+8. [Complete Flow Summary](#8-complete-flow-summary)
+9. [Data Flow - Single PCAP Processing](#9-data-flow---single-pcap-processing)
+10. [System Configuration State](#10-system-configuration-state)
+
+---
+
 ## 1. APPLICATION STARTUP FLOW
 
 ```mermaid
