@@ -44,8 +44,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Init dark mode from localStorage
     initDarkMode();
     
-    // Initialize detection mode dropdown
-    initDetectionModeDropdown();
+    // Load system settings from server before initializing UI
+    loadSystemSettingsBeforeUI();
     
     // Initialize IPS toggle
     initIPSToggle();
@@ -211,6 +211,46 @@ async function updateProfile() {
         const theme = formData.get('theme');
         applyTheme(theme);
     } catch(e) { alert("Error"); }
+}
+
+// Load system settings from server and apply to UI before initialization
+async function loadSystemSettingsBeforeUI() {
+    try {
+        const res = await fetch('/api/user-info');
+        const data = await res.json();
+        
+        if (data.config_mode) {
+            const modeSelector = document.getElementById('modeSelector');
+            if (modeSelector) {
+                modeSelector.value = data.config_mode;
+            }
+        }
+        
+        if (data.config_threshold) {
+            const threshSlider = document.getElementById('threshSlider');
+            const threshDisplay = document.getElementById('thresh-display');
+            if (threshSlider) {
+                threshSlider.value = data.config_threshold;
+            }
+            if (threshDisplay) {
+                threshDisplay.textContent = data.config_threshold;
+            }
+        }
+        
+        if (data.ips_enabled !== undefined) {
+            const ipsToggle = document.getElementById('ipsToggle');
+            if (ipsToggle) {
+                ipsToggle.checked = data.ips_enabled;
+            }
+        }
+        
+        // Now initialize the UI with correct values
+        initDetectionModeDropdown();
+    } catch (e) {
+        console.error('Error loading system settings:', e);
+        // Fallback: initialize with default values
+        initDetectionModeDropdown();
+    }
 }
 
 // Load user login history for profile page
@@ -1374,7 +1414,7 @@ function getDetectionSourceDescription(source) {
         'VERIFIED_BENIGN': 'Both ML and IPS agree - Verified safe traffic',
         'ML_BENIGN': 'ML marked as benign without IPS check',
         'RF_ONLY': 'Random Forest single-model detection',
-        'DNN_ONLY': 'Deep Neural Network single-model \n detection (fast mode)',
+        'DNN_ONLY': 'Deep Neural Network single-model detection (fast mode)',
         'NO_MODEL': 'No ML model available'
     };
     return descriptions[source] || 'Unknown detection source';
