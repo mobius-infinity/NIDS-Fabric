@@ -1697,7 +1697,7 @@ async function executeDeleteEvidence() {
         if (data.status === 'success') {
             alert(data.message);
             closeDeleteEvidenceModal();
-            closeLogPanel();
+            closeDetails();
             loadIncomingFiles();
         } else {
             alert('Error: ' + (data.message || 'Failed to delete evidence'));

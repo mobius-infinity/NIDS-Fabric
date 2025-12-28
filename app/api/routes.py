@@ -314,6 +314,15 @@ def get_incoming_files():
         for pcap_id, metadata in PCAP_METADATA.items():
             # Don't add if already in list from incoming folder (check by pcap_id for uniqueness)
             if not any(x['pcap_id'] == pcap_id for x in files):
+                # Skip threat files that have been deleted (exists=False)
+                is_threat = bool(metadata.get('is_threat', False))
+                file_exists = metadata.get('exists', True)  # Default True for backward compatibility
+                
+                # For threat files, only show if file still exists
+                # For safe files, always show (they're deleted by design but metadata preserved)
+                if is_threat and not file_exists:
+                    continue  # Skip deleted evidence files
+                
                 files.append({
                     "pcap_id": pcap_id,
                     "name": metadata.get('pcap_name', ''),
@@ -323,7 +332,7 @@ def get_incoming_files():
                     "total_flows": int(metadata.get('total_flows', 0)),
                     "threat_flows": int(metadata.get('threat_flows', 0)),
                     "safe_flows": int(metadata.get('safe_flows', 0)),
-                    "is_threat": bool(metadata.get('is_threat', False))
+                    "is_threat": is_threat
                 })
     
     # Add files from FILE_STATUS that were processed but moved
@@ -1855,12 +1864,25 @@ def delete_evidence_pcap():
         # Delete the file
         os.remove(filepath)
         
-        # Update PCAP metadata to mark as deleted
+        # Update PCAP metadata to mark as deleted (in memory cache)
         with PCAP_METADATA_LOCK:
             for pcap_id, metadata in PCAP_METADATA.items():
                 if metadata.get('pcap_name') == safe_filename:
-                    metadata['pcap_exists'] = False
+                    metadata['exists'] = False
                     break
+        
+        # Update CSV file as well
+        try:
+            pcap_info_folder = current_app.config.get('PCAP_INFO_FOLDER')
+            pcap_metadata_path = os.path.join(pcap_info_folder, 'metadata_pcaps.csv')
+            if os.path.exists(pcap_metadata_path):
+                df = pd.read_csv(pcap_metadata_path, sep='#', low_memory=False)
+                mask = df['pcap_name'] == safe_filename
+                if mask.any():
+                    df.loc[mask, 'exists'] = False
+                    df.to_csv(pcap_metadata_path, index=False, sep='#')
+        except Exception as csv_err:
+            print(f"[Warning] Could not update CSV metadata: {csv_err}")
         
         return jsonify({
             'status': 'success',

@@ -963,14 +963,14 @@
     </div>
 
     <!-- Delete Evidence PCAP Modal -->
-    <div id="deleteEvidenceModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;">
-        <div style="background: var(--bg-main); border-radius: 12px; padding: 24px; width: 400px; max-width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+    <div id="deleteEvidenceModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 10000; justify-content: center; align-items: center;">
+        <div style="background: var(--card-bg); border-radius: 12px; padding: 24px; width: 400px; max-width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); border: 1px solid var(--border-color);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h3 style="margin: 0; color: #ef4444;"><i class="fas fa-exclamation-triangle" style="margin-right: 8px;"></i>Delete Evidence</h3>
                 <button onclick="closeDeleteEvidenceModal()" style="background: none; border: none; font-size: 1.5em; cursor: pointer; color: var(--text-muted);">&times;</button>
             </div>
             <div style="margin-bottom: 20px;">
-                <p style="margin: 0 0 12px 0; color: var(--text-main);">
+                <p style="margin: 0 0 12px 0; color: var(--text-body);">
                     <strong>Warning:</strong> You are about to permanently delete an evidence PCAP file.
                 </p>
                 <div style="background: #fef3c7; border: 1px solid #fbbf24; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
@@ -979,20 +979,20 @@
                     </div>
                     <div id="deleteEvidenceFilename" style="color: #78350f; font-family: monospace;"></div>
                 </div>
-                <p style="margin: 0; font-size: 0.9em; color: var(--text-muted);">
+                <p style="margin: 0; font-size: 0.9em; color: var(--text-body);">
                     This action cannot be undone. Please enter your password to confirm.
                 </p>
             </div>
             <div style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-main);">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-body);">
                     <i class="fas fa-lock" style="margin-right: 6px;"></i>Confirm Password
                 </label>
                 <input type="password" id="deleteEvidencePassword" placeholder="Enter your password" 
-                    style="width: 100%; padding: 12px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-main); font-size: 1em;"
+                    style="width: 100%; padding: 12px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-body); font-size: 1em; box-sizing: border-box;"
                     onkeypress="if(event.key==='Enter') executeDeleteEvidence()">
             </div>
             <div style="display: flex; gap: 12px;">
-                <button onclick="closeDeleteEvidenceModal()" class="btn" style="flex: 1; background: var(--bg-secondary);">
+                <button onclick="closeDeleteEvidenceModal()" class="btn" style="flex: 1; background: var(--border-color); color: var(--text-body);">
                     <i class="fas fa-times"></i> Cancel
                 </button>
                 <button onclick="executeDeleteEvidence()" class="btn" style="flex: 1; background: #ef4444;">
