@@ -151,7 +151,10 @@ def update_ips_log(app, df_raw, ips_matches, filename, timestamp):
         # Filter only matched flows
         matched_indices = [i for i, m in enumerate(ips_matches) if m.get('matched', False)]
         
+        print(f"[IPS Log Debug] Total flows: {len(ips_matches)}, Matched flows: {len(matched_indices)}")
+        
         if not matched_indices:
+            print(f"[IPS Log] No IPS matches found in {filename}")
             return  # No IPS matches to log
         
         # Create log entries only for matched flows

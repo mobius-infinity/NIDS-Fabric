@@ -146,6 +146,9 @@ class IPSEngine:
         flow_ja3s = str(flow_data.get('JA3S_HASH', '')).strip()
         flow_sni = str(flow_data.get('SSL_SERVER_NAME', '')).strip()
         
+        # Debug: Log if flow has TLS fields
+        has_tls = bool(flow_ja3 and flow_ja3 != '' or flow_ja3s and flow_ja3s != '' or flow_sni and flow_sni != '')
+        
         for rule in self.rules:
             match_result = self._check_rule_match(
                 flow_proto, flow_src_port, flow_dst_port, 
