@@ -179,9 +179,12 @@ class IPSEngine:
         """
         Check if flow matches a specific rule.
         
-        MATCHING PRIORITY:
-        1. TLS FINGERPRINTS (JA3, JA3S, SNI) - High confidence, low false positives
-        2. PORT MATCHING - Secondary check if no TLS data available
+        TLS FINGERPRINT ONLY MATCHING:
+        - JA3 Client Hash - malicious client TLS fingerprint
+        - JA3S Server Hash - malicious server TLS fingerprint  
+        - SNI (Server Name Indication) - malicious domain names
+        
+        NO PORT-BASED MATCHING to reduce false positives and avoid triggering on legitimate services.
         """
         try:
             # TLS Fingerprint fields from rule
@@ -210,25 +213,8 @@ class IPSEngine:
                     if rule_sni == flow_sni_lower or flow_sni_lower.endswith('.' + rule_sni):
                         return {'matched': True, 'match_type': 'SNI'}
             
-            # === PRIORITY 4: PORT MATCHING (FALLBACK) ===
-            # Use port matching only if TLS fingerprints are not available
-            # This catches attacks that don't have TLS fingerprint indicators
-            rule_port = str(rule.get('port', '')).strip()
-            if rule_port and rule_port not in ['', 'nan', 'none', 'any']:
-                try:
-                    # Parse port specification (single port or range)
-                    if '-' in rule_port:
-                        port_min, port_max = map(int, rule_port.split('-'))
-                        if flow_dst_port and port_min <= int(flow_dst_port) <= port_max:
-                            return {'matched': True, 'match_type': 'PORT'}
-                    else:
-                        rule_port_num = int(rule_port)
-                        if flow_dst_port and int(flow_dst_port) == rule_port_num:
-                            return {'matched': True, 'match_type': 'PORT'}
-                except (ValueError, TypeError):
-                    pass
-            
-            # No match
+            # No match - rule doesn't have TLS fingerprint indicators
+            # or flow doesn't match any TLS fingerprint
             return {'matched': False, 'match_type': None}
             
         except Exception as e:
