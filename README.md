@@ -1,6 +1,6 @@
 # NIDS-Fabric
 
-A Hybrid Network Intrusion Detection System combining Machine Learning (6 ML models with consensus voting) and IPS Engine (TLS Fingerprint matching via JA3/JA3S/SNI).
+A Hybrid Network Intrusion Detection System combining Machine Learning - 6 ML models with consensus voting and IPS Engine -TLS Fingerprint matching via JA3/JA3S/SNI.
 
 ## Motivation & Problem Statement
 
