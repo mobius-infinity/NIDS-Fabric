@@ -1374,6 +1374,7 @@ function getDetectionSourceDescription(source) {
         'VERIFIED_BENIGN': 'Both ML and IPS agree - Verified safe traffic',
         'ML_BENIGN': 'ML marked as benign without IPS check',
         'RF_ONLY': 'Random Forest single-model detection',
+        'DNN_ONLY': 'Deep Neural Network single-model detection (fast mode)',
         'NO_MODEL': 'No ML model available'
     };
     return descriptions[source] || 'Unknown detection source';
@@ -1389,6 +1390,7 @@ function getDetectionSourceIcon(source) {
         'VERIFIED_BENIGN': 'fa-check-circle',
         'ML_BENIGN': 'fa-robot',
         'RF_ONLY': 'fa-tree',
+        'DNN_ONLY': 'fa-brain',
         'NO_MODEL': 'fa-question-circle'
     };
     return icons[source] || 'fa-question-circle';
@@ -1404,6 +1406,7 @@ function getDetectionSourceClass(source) {
         'VERIFIED_BENIGN': 'badge-safe',
         'ML_BENIGN': 'badge-safe',
         'RF_ONLY': 'badge-info',
+        'DNN_ONLY': 'badge-info',
         'NO_MODEL': 'badge-secondary'
     };
     return classes[source] || 'badge-secondary';
