@@ -1,2 +1,2 @@
 id#name#url#interval_minutes#last_update#last_status#rules_count#enabled#created_at#error_message
-07f6841a#Emerging Threat#https://rules.emergingthreats.net/open/suricata/emerging-all.rules#10#2025-12-28 20:50:22#success#45317#True#2025-12-28 15:40:42#
+07f6841a#Emerging Threat#https://rules.emergingthreats.net/open/suricata/emerging-all.rules#10#2025-12-28 21:12:20#success#45317#True#2025-12-28 15:40:42#
