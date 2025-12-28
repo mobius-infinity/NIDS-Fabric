@@ -33,7 +33,7 @@ graph TD
     style A fill:#ff9d4d
     style M fill:#10b981
     style N fill:#10b981
-```Structure
+```
 
 ---
 
