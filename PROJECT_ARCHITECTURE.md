@@ -455,10 +455,10 @@ stateDiagram-v2
     InMemory --> IPSEnabled: IPS toggle
     
     DetectionMode --> VotingMode: "voting"
-    DetectionMode --> RFOnlyMode: "rf_only"
+    DetectionMode --> DNNOnlyMode: "dnn_only"
     
     VotingMode --> Analysis6Models: 6 models vote
-    RFOnlyMode --> AnalysisRFOnly: 1 model fast
+    DNNOnlyMode --> AnalysisDNNOnly: 1 model fast
     
     Analysis6Models --> HybridDetection
     AnalysisRFOnly --> HybridDetection

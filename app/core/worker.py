@@ -457,7 +457,7 @@ def thread_pcap_worker(app):
                             detection_sources = []
                             ips_matches = []
                             
-                            if current_mode == 'rf_only':
+                            if current_mode == 'dnn_only':
                                 model, scaler, _, _ = model_cache.get_model('DNN', 'binary')
                                 if model: 
                                     final_decisions = get_binary_prediction_vector(df_raw, model, scaler, 'dnn', FEATURES_DNN_RF)
