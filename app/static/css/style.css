@@ -13,7 +13,13 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 
 /* --- SIDEBAR & LAYOUT --- */
 .sidebar { width: 260px; background: var(--card-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; z-index: 10; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
-.sidebar-header { padding: 0 20px; height: 64px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); }
+.sidebar-header { padding: 0 20px; height: 64px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+.sidebar-menu-wrapper { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.sidebar-menu-wrapper::-webkit-scrollbar { width: 6px; }
+.sidebar-menu-wrapper::-webkit-scrollbar-track { background: transparent; }
+.sidebar-menu-wrapper::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+.sidebar-menu-wrapper::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.sidebar-menu-wrapper { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
 .brand-group { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--text-main); font-size: 1.1em; white-space: nowrap; }
 .toggle-btn { cursor: pointer; color: var(--text-muted); padding: 8px; border-radius: 6px; }
 .toggle-btn:hover { background: var(--bg-secondary); color: var(--text-main); }
@@ -115,6 +121,11 @@ tbody tr:hover { background-color: #f0f9ff; }
     font-weight: 700; color: var(--text-main); font-size: 1.1em;
 }
 .forti-content { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
+.forti-content::-webkit-scrollbar { width: 6px; }
+.forti-content::-webkit-scrollbar-track { background: transparent; }
+.forti-content::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+.forti-content::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.forti-content { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
 
 .forti-group { margin-top: 20px; }
 .forti-group-title {

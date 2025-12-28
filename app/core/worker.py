@@ -458,10 +458,10 @@ def thread_pcap_worker(app):
                             ips_matches = []
                             
                             if current_mode == 'dnn_only':
-                                model, scaler, _, _ = model_cache.get_model('DNN', 'binary')
+                                model, scaler, encoder, _ = model_cache.get_model('DNN', 'multiclass')
                                 if model: 
                                     final_decisions = get_binary_prediction_vector(df_raw, model, scaler, 'dnn', FEATURES_DNN_RF)
-                                    votes = final_decisions.astype(int)  # DNN only = 0 or 1 vote
+                                    votes = final_decisions.astype(int)  # DNN multiclass only = 0 or 1 vote
                                     detection_sources = ['DNN_ONLY'] * len(df_raw)
                                     ips_matches = [{'matched': False, 'rule_id': None, 'rule_name': None}] * len(df_raw)
                                 else:
