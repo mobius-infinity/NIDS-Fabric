@@ -1318,7 +1318,7 @@ function showConsensusDetails(flowId) {
                 <div class="forti-group">
                     <div class="forti-group-title"><i class="fas fa-shield-alt" style="margin-right:6px;"></i>Hybrid Detection</div>
                     <div class="forti-row"><span class="forti-label">Detection Source</span><span class="badge ${sourceClass}"><i class="fas ${sourceIcon}" style="margin-right:4px;"></i>${formatDetectionSource(detectionSource)}</span></div>
-                    <div class="forti-row"><span class="forti-label">Description</span><span class="forti-val" style="font-size:11px;">${sourceDescription}</span></div>
+                    <div class="forti-row"><span class="forti-label">Description</span><span class="forti-val" style="font-size:12px;">${sourceDescription}</span></div>
                     <div class="forti-row"><span class="forti-label">IPS Matched</span><span class="forti-val ${ipsMatched ? 'forti-threat' : 'forti-safe'}">${ipsMatched ? 'YES' : 'NO'}</span></div>
                     ${ipsMatched ? `
                     <div class="forti-row"><span class="forti-label">IPS Rule ID</span><span class="forti-val">${ipsRuleId}</span></div>
@@ -1374,7 +1374,7 @@ function getDetectionSourceDescription(source) {
         'VERIFIED_BENIGN': 'Both ML and IPS agree - Verified safe traffic',
         'ML_BENIGN': 'ML marked as benign without IPS check',
         'RF_ONLY': 'Random Forest single-model detection',
-        'DNN_ONLY': 'Deep Neural Network single-model detection (fast mode)',
+        'DNN_ONLY': 'Deep Neural Network single-model \n detection (fast mode)',
         'NO_MODEL': 'No ML model available'
     };
     return descriptions[source] || 'Unknown detection source';
