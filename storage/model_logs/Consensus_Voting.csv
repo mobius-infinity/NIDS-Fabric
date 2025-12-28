@@ -1,1 +1,1 @@
-id#time_scaned#file_scaned#IPV4_SRC_ADDR#L4_SRC_PORT#IPV4_DST_ADDR#L4_DST_PORT#PROTOCOL#votes#threshold#detection_mode#result#confidence
+id#time_scaned#file_scaned#IPV4_SRC_ADDR#L4_SRC_PORT#IPV4_DST_ADDR#L4_DST_PORT#PROTOCOL#votes#threshold#detection_mode#result#confidence#detection_source#ips_matched#ips_rule_id#ips_rule_name

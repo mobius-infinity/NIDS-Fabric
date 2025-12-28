@@ -137,6 +137,7 @@
                                 <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('dstip')">Dst IP <span id="consensusSortDstip"></span></th>
                                 <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Dst Port</th>
                                 <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('votes')">Votes <span id="consensusSortVotes"></span></th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('source')">Source <span id="consensusSortSource"></span></th>
                                 <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortConsensusLogs('result')">Result <span id="consensusSortResult"></span></th>
                             </tr>
                         </thead>
@@ -443,12 +444,195 @@
         </div>
     </div>
 
+    <!-- IPS Logs View -->
+    <div id="view-ips-logs" class="view-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2 style="margin: 0; color: var(--text-main);">IPS Detection Logs</h2>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button class="btn" onclick="loadIPSLogs()"><i class="fas fa-sync-alt"></i> Refresh</button>
+                <button class="btn" style="background: #ef4444;" onclick="clearIPSLogs()"><i class="fas fa-trash"></i> Clear Logs</button>
+            </div>
+        </div>
+        
+        <!-- Statistics Cards -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;">
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 2em; font-weight: 800; color: var(--text-main);" id="ips-stat-total">0</div>
+                <div style="font-size: 0.9em; color: var(--text-muted);">Total Detections</div>
+            </div>
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 2em; font-weight: 800; color: #ef4444;" id="ips-stat-critical">0</div>
+                <div style="font-size: 0.9em; color: var(--text-muted);">Critical</div>
+            </div>
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 2em; font-weight: 800; color: #f59e0b;" id="ips-stat-high">0</div>
+                <div style="font-size: 0.9em; color: var(--text-muted);">High</div>
+            </div>
+            <div class="card" style="text-align: center; padding: 16px;">
+                <div style="font-size: 2em; font-weight: 800; color: #3b82f6;" id="ips-stat-medium">0</div>
+                <div style="font-size: 0.9em; color: var(--text-muted);">Medium/Low</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <span>Detection Logs</span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="ipsLogsSeverityFilter" onchange="applyIPSLogsFilters()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85em; background: var(--bg-primary); color: var(--text-main);">
+                        <option value="">All Severities</option>
+                        <option value="Critical">Critical</option>
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                    <input type="text" id="ipsLogsSearch" placeholder="Search..." onkeyup="debounceIPSLogsSearch()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; width: 200px; font-size: 0.85em; background: var(--bg-primary); color: var(--text-main);">
+                    <button class="btn" onclick="clearIPSLogsFilters()" style="padding: 6px 10px; font-size: 0.85em;"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div class="card-body" style="padding: 0; height: 500px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
+                        <tr>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSLogs('time')">#</th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSLogs('time')">Time <span id="ipsLogsSortTime"></span></th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color);">File</th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSLogs('src_ip')">Src IP <span id="ipsLogsSortSrcIp"></span></th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color);">Src Port</th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSLogs('dst_ip')">Dst IP <span id="ipsLogsSortDstIp"></span></th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color);">Dst Port</th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSLogs('rule_name')">Rule Matched <span id="ipsLogsSortRuleName"></span></th>
+                            <th style="padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSLogs('match_type')">Match Type <span id="ipsLogsSortMatchType"></span></th>
+                            <th style="padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSLogs('severity')">Severity <span id="ipsLogsSortSeverity"></span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ipsLogsBody"></tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div style="padding: 12px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color);">
+                <span style="font-size: 0.85em; color: var(--text-muted);" id="ipsLogsInfo">Showing 0 of 0 logs</span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn" id="ipsLogsPrevBtn" onclick="ipsLogsPrevPage()" disabled style="font-size: 0.85em; padding: 6px 12px;">&lt; Prev</button>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span style="font-size: 0.85em;">Page</span>
+                        <input type="number" id="ipsLogsPageInput" min="1" value="1" onkeypress="if(event.key==='Enter') ipsLogsGoToPage()" style="width: 50px; padding: 4px 6px; border: 1px solid var(--border-color); border-radius: 4px; text-align: center; font-size: 0.85em; background: var(--bg-primary); color: var(--text-main);">
+                        <span style="font-size: 0.85em;">/ <span id="ipsLogsTotalPagesDisplay">1</span></span>
+                        <button class="btn" onclick="ipsLogsGoToPage()" style="font-size: 0.8em; padding: 4px 8px;">Go</button>
+                    </div>
+                    <button class="btn" id="ipsLogsNextBtn" onclick="ipsLogsNextPage()" disabled style="font-size: 0.85em; padding: 6px 12px;">Next &gt;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Summary View -->
+    <div id="view-log-summary" class="view-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2 style="margin: 0; color: var(--text-main);">Log Summary & Management</h2>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button class="btn" onclick="loadLogSummary()" style="background: #10b981;"><i class="fas fa-sync-alt"></i> Refresh</button>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;" id="logSummaryStats"></div>
+
+        <!-- Logs Summary Table -->
+        <div class="card">
+            <div class="card-header">
+                <span>Logs Overview</span>
+                <div style="display: flex; gap: 8px; margin-left: auto;">
+                    <button class="btn" onclick="openBulkDeleteModal()" style="background: #ef4444;"><i class="fas fa-trash"></i> Bulk Delete</button>
+                </div>
+            </div>
+            <div class="card-body" style="padding: 0; max-height: 600px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
+                        <tr>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">
+                                <input type="checkbox" id="selectAllLogs" onchange="toggleSelectAllLogs(this)">
+                            </th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Log Type</th>
+                            <th style="padding: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">Entries</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Status</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Last Updated</th>
+                            <th style="padding: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logSummaryTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div id="view-ips-database" class="view-section">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
             <h2 style="margin: 0; color: var(--text-main);">IPS/IDS Rules Database</h2>
             <div style="display: flex; gap: 8px; align-items: center;">
-                <input type="text" id="ipsSearchBox" placeholder="Search rules..." style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; width: 250px;">
+                <input type="text" id="ipsSearchBox" placeholder="Search rules..." onkeyup="syncIPSSearch(this)" style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; width: 250px; background: var(--bg-primary); color: var(--text-main);">
+                <button class="btn" onclick="toggleAddJA3Form()" style="background:#8b5cf6;"><i class="fas fa-fingerprint"></i> Add JA3 Rule</button>
                 <button class="btn" onclick="loadIPSRules()"><i class="fas fa-sync-alt"></i> Refresh</button>
+            </div>
+        </div>
+        
+        <!-- Add JA3/TLS Fingerprint Rule Form (Hidden by default) -->
+        <div id="add-ja3-form" class="card" style="margin-bottom: 24px; display: none;">
+            <div class="card-header">
+                <span><i class="fas fa-fingerprint" style="color:#8b5cf6;"></i> Add TLS Fingerprint Rule (JA3/JA3S/SNI)</span>
+                <button class="btn" onclick="toggleAddJA3Form()" style="padding:4px 8px; font-size:0.85em;"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="card-body" style="padding: 16px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                        <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">Rule Name <span style="color:#ef4444;">*</span></label>
+                        <input type="text" id="ja3-rule-name" placeholder="e.g., Cobalt Strike JA3" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-main);">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">Category</label>
+                        <select id="ja3-rule-category" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-main);">
+                            <option value="C2/Malware">C2/Malware</option>
+                            <option value="Trojan Activity">Trojan Activity</option>
+                            <option value="Backdoor">Backdoor</option>
+                            <option value="Ransomware">Ransomware</option>
+                            <option value="Phishing">Phishing</option>
+                            <option value="Suspicious Traffic">Suspicious Traffic</option>
+                            <option value="Policy Violation">Policy Violation</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">JA3 Client Fingerprint (MD5)</label>
+                        <input type="text" id="ja3-rule-ja3" placeholder="e.g., a0e9f5d64349fb13191bc781f81f42e1" maxlength="32" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-main); font-family: monospace;">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">JA3S Server Fingerprint (MD5)</label>
+                        <input type="text" id="ja3-rule-ja3s" placeholder="e.g., ae4edc6faf64d08308082ad26be60767" maxlength="32" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-main); font-family: monospace;">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">SNI (Server Name)</label>
+                        <input type="text" id="ja3-rule-sni" placeholder="e.g., malicious-domain.com" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-main);">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">Severity <span style="color:#ef4444;">*</span></label>
+                        <select id="ja3-rule-severity" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-main);">
+                            <option value="Critical">Critical</option>
+                            <option value="High" selected>High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top: 16px;">
+                    <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">Description</label>
+                    <textarea id="ja3-rule-description" rows="2" placeholder="Description of this fingerprint rule..." style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-main); resize: vertical;"></textarea>
+                </div>
+                <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
+                    <button class="btn" onclick="toggleAddJA3Form()" style="background: var(--bg-secondary); color: var(--text-main);">Cancel</button>
+                    <button class="btn" onclick="addJA3Rule()" style="background: #8b5cf6;"><i class="fas fa-plus"></i> Add JA3 Rule</button>
+                </div>
+                <div style="margin-top: 12px; padding: 10px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; font-size: 0.85em; color: var(--text-muted);">
+                    <i class="fas fa-info-circle" style="color:#8b5cf6;"></i> <strong>Tip:</strong> JA3 fingerprints are 32-character MD5 hashes. You can find known malicious JA3 fingerprints from threat intelligence sources like <a href="https://sslbl.abuse.ch/ja3-fingerprints/" target="_blank" style="color:#8b5cf6;">abuse.ch JA3 Fingerprints</a>.
+                </div>
             </div>
         </div>
         
@@ -478,18 +662,76 @@
             </div>
         </div>
         
+        <!-- Rule Sources Section -->
         <div class="card" style="margin-bottom: 24px;">
-            <div class="card-header"><span>Import Rules</span></div>
+            <div class="card-header">
+                <span><i class="fas fa-satellite-dish"></i> Rule Sources</span>
+                <button class="btn" onclick="refreshAllSources()" style="margin-left: auto; padding: 4px 10px; font-size: 0.85em;">
+                    <i class="fas fa-sync-alt"></i> Refresh All
+                </button>
+            </div>
+            <div class="card-body" style="padding: 12px;">
+                <!-- Add New Source Form -->
+                <div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                    <div style="display: grid; grid-template-columns: 200px 1fr 120px 100px auto; gap: 10px; align-items: end;">
+                        <div>
+                            <label style="font-size: 0.8em; color: var(--text-muted); display: block; margin-bottom: 4px;">Source Name</label>
+                            <input type="text" id="new-source-name" placeholder="Emerging Threats" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9em;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8em; color: var(--text-muted); display: block; margin-bottom: 4px;">URL</label>
+                            <input type="text" id="new-source-url" placeholder="https://rules.emergingthreats.net/open/snort-2.9.0/emerging-all.rules" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9em;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8em; color: var(--text-muted); display: block; margin-bottom: 4px;">Interval (min)</label>
+                            <input type="number" id="new-source-interval" value="10" min="1" max="1440" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9em;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8em; color: var(--text-muted); display: block; margin-bottom: 4px;">Auto Refresh</label>
+                            <select id="new-source-auto-refresh" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9em;">
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
+                        <button class="btn" onclick="addNewSource()" style="padding: 8px 16px;">
+                            <i class="fas fa-plus"></i> Add Source
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Sources Table -->
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    <thead>
+                        <tr style="background: var(--bg-secondary);">
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color);">Status</th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color);">Name</th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color);">URL</th>
+                            <th style="padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color);">Interval</th>
+                            <th style="padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color);">Rules</th>
+                            <th style="padding: 10px; text-align: left; border-bottom: 1px solid var(--border-color);">Last Update</th>
+                            <th style="padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color);">Enabled</th>
+                            <th style="padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color);">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ips-sources-body">
+                        <tr><td colspan="8" style="padding: 20px; text-align: center; color: var(--text-muted);">Loading sources...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header"><span>Import Rules (Manual)</span></div>
             <div class="card-body">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                     <!-- File Upload -->
                     <div>
-                        <h4 style="margin-top: 0; color: var(--text-main);">Upload CSV File</h4>
-                        <p style="color: var(--text-muted); font-size: 0.9em;">Import rules from a local CSV file. Required columns: rule_id, rule_name, severity, category</p>
+                        <h4 style="margin-top: 0; color: var(--text-main);">Upload Rules File</h4>
+                        <p style="color: var(--text-muted); font-size: 0.9em;">Import rules from CSV file or Snort/Suricata .rules file</p>
                         <div style="display: flex; gap: 8px;">
                             <label for="ips-import-file" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; background: var(--bg-secondary); transition: all 0.3s;">
-                                <span id="ips-import-file-label" style="color: var(--text-muted); font-weight: 500;">Choose CSV file</span>
-                                <input type="file" id="ips-import-file" accept=".csv" style="display: none;" />
+                                <span id="ips-import-file-label" style="color: var(--text-muted); font-weight: 500;">Choose .csv or .rules file</span>
+                                <input type="file" id="ips-import-file" accept=".csv,.rules" style="display: none;" />
                             </label>
                             <button class="btn" onclick="importIPSRulesFromFile()" style="white-space: nowrap;">
                                 <i class="fas fa-upload"></i> Import
@@ -497,10 +739,10 @@
                         </div>
                     </div>
                     
-                    <!-- URL Import -->
+                    <!-- URL Import (Manual - no source tracking) -->
                     <div>
-                        <h4 style="margin-top: 0; color: var(--text-main);">Import from URL</h4>
-                        <p style="color: var(--text-muted); font-size: 0.9em;">Download rules from a remote CSV URL. Supports public threat intelligence feeds.</p>
+                        <h4 style="margin-top: 0; color: var(--text-main);">Quick Import from URL</h4>
+                        <p style="color: var(--text-muted); font-size: 0.9em;">One-time import without source tracking</p>
                         <div style="display: flex; gap: 8px;">
                             <input type="text" id="ips-import-url" placeholder="https://example.com/rules.csv" style="flex: 1; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px;" />
                             <button class="btn" onclick="importIPSRulesFromURL()" style="white-space: nowrap;">
@@ -513,25 +755,156 @@
         </div>
         
         <div class="card" style="margin-bottom: 24px;">
-            <div class="card-header"><span>IPS Rules</span></div>
-            <div class="card-body" style="padding: 0; height: 600px; overflow-y: auto;">
+            <div class="card-header">
+                <span>IPS Rules</span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="ipsSeverityFilter" onchange="applyIPSFilters()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.85em; background: var(--bg-primary); color: var(--text-main);">
+                        <option value="">All Severities</option>
+                        <option value="Critical">Critical</option>
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                    <input type="text" id="ipsRulesSearch" placeholder="Search rules..." onkeyup="syncIPSSearch(this)" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; width: 200px; font-size: 0.85em; background: var(--bg-primary); color: var(--text-main);">
+                    <button class="btn" onclick="clearIPSFilters()" style="padding: 6px 10px; font-size: 0.85em;"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div class="card-body" style="padding: 0; height: 500px; overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
                     <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
                         <tr>
-                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Rule ID</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Rule Name</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color);">Category</th>
-                            <th style="padding: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">Severity</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSRules('rule_id')">Rule ID <span id="ipsSortRuleId"></span></th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSRules('rule_name')">Rule Name <span id="ipsSortRuleName"></span></th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSRules('category')">Category <span id="ipsSortCategory"></span></th>
+                            <th style="padding: 12px; text-align: center; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="sortIPSRules('severity')">Severity <span id="ipsSortSeverity"></span></th>
                             <th style="padding: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">Source</th>
                         </tr>
                     </thead>
                     <tbody id="ipsRulesBody" style="cursor: pointer;"></tbody>
                 </table>
             </div>
+            <!-- Pagination -->
+            <div style="padding: 12px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color);">
+                <span style="font-size: 0.85em; color: var(--text-muted);" id="ipsRulesInfo">Showing 0 of 0 rules</span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn" id="ipsPrevBtn" onclick="ipsPrevPage()" disabled style="font-size: 0.85em; padding: 6px 12px;">&lt; Prev</button>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span style="font-size: 0.85em;">Page</span>
+                        <input type="number" id="ipsPageInput" min="1" value="1" onkeypress="if(event.key==='Enter') ipsGoToPage()" style="width: 50px; padding: 4px 6px; border: 1px solid var(--border-color); border-radius: 4px; text-align: center; font-size: 0.85em; background: var(--bg-primary); color: var(--text-main);">
+                        <span style="font-size: 0.85em;">/ <span id="ipsTotalPagesDisplay">1</span></span>
+                        <button class="btn" onclick="ipsGoToPage()" style="font-size: 0.8em; padding: 4px 8px;">Go</button>
+                    </div>
+                    <button class="btn" id="ipsNextBtn" onclick="ipsNextPage()" disabled style="font-size: 0.85em; padding: 6px 12px;">Next &gt;</button>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div class="slide-overlay" id="panelOverlay" onclick="closeDetails()"></div>
+    <!-- System Logs View -->
+    <div id="view-system-logs" class="view-section">
+        <h2 style="margin-bottom: 24px; color: var(--text-main);">System Logs</h2>
+        
+        <div class="card">
+            <div class="card-header">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button id="syslog-tab-api" class="btn" style="background: var(--text-main); color: white;" onclick="switchSysLogTab('api')">
+                        <i class="fas fa-code"></i> API Calls
+                    </button>
+                    <button id="syslog-tab-login" class="btn" style="background: var(--bg-secondary);" onclick="switchSysLogTab('login')">
+                        <i class="fas fa-user-check"></i> User Logins
+                    </button>
+                    <button id="syslog-tab-system" class="btn" style="background: var(--bg-secondary);" onclick="switchSysLogTab('system')">
+                        <i class="fas fa-microchip"></i> System Metrics
+                    </button>
+                    <button class="btn" style="margin-left: auto;" onclick="loadSystemLogs()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+            
+            <!-- API Calls Tab -->
+            <div id="syslog-api-panel" class="card-body" style="padding: 0;">
+                <div style="padding: 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; gap: 8px;">
+                    <input type="text" id="apiSearchInput" placeholder="Search API..." onkeyup="filterAPILogs()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; flex: 1; background: var(--bg-primary); color: var(--text-main);">
+                    <select id="apiMethodFilter" onchange="filterAPILogs()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-main);">
+                        <option value="">All Methods</option>
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                        <option value="PUT">PUT</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                </div>
+                <div style="height: 500px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
+                            <tr>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Time</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Method</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Endpoint</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">User</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="apiLogsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- User Logins Tab -->
+            <div id="syslog-login-panel" class="card-body" style="padding: 0; display: none;">
+                <div style="padding: 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; gap: 8px;">
+                    <input type="text" id="loginSearchInput" placeholder="Search username..." onkeyup="filterLoginLogs()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; flex: 1; background: var(--bg-primary); color: var(--text-main);">
+                    <select id="loginStatusFilter" onchange="filterLoginLogs()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-main);">
+                        <option value="">All Status</option>
+                        <option value="success">Success</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                </div>
+                <div style="height: 500px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
+                            <tr>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Time</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Username</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">IP Address</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Status</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="loginLogsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- System Metrics Tab -->
+            <div id="syslog-system-panel" class="card-body" style="padding: 0; display: none;">
+                <div style="padding: 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; gap: 8px;">
+                    <select id="systemTypeFilter" onchange="filterSystemLogs()" style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-main);">
+                        <option value="">All Types</option>
+                        <option value="cpu">CPU</option>
+                        <option value="memory">Memory</option>
+                        <option value="disk">Disk</option>
+                        <option value="error">Error</option>
+                    </select>
+                </div>
+                <div style="height: 500px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary);">
+                            <tr>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Time</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Type</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Value</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color);">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="systemLogsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+                <div class="slide-overlay" id="panelOverlay" onclick="closeDetails()"></div>
     <div class="forti-panel" id="logDetailPanel">
         <div class="forti-header">
             <span id="detailPanelTitle"><i class="fas fa-list-alt" style="color:var(--text-main); margin-right:8px;"></i> Details</span>
@@ -539,5 +912,45 @@
         </div>
         <div class="forti-content" id="panelContent">
             </div>
+    </div>
+
+    <!-- Delete Evidence PCAP Modal -->
+    <div id="deleteEvidenceModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;">
+        <div style="background: var(--bg-main); border-radius: 12px; padding: 24px; width: 400px; max-width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0; color: #ef4444;"><i class="fas fa-exclamation-triangle" style="margin-right: 8px;"></i>Delete Evidence</h3>
+                <button onclick="closeDeleteEvidenceModal()" style="background: none; border: none; font-size: 1.5em; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div style="margin-bottom: 20px;">
+                <p style="margin: 0 0 12px 0; color: var(--text-main);">
+                    <strong>Warning:</strong> You are about to permanently delete an evidence PCAP file.
+                </p>
+                <div style="background: #fef3c7; border: 1px solid #fbbf24; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #92400e; margin-bottom: 4px;">
+                        <i class="fas fa-file"></i> File to delete:
+                    </div>
+                    <div id="deleteEvidenceFilename" style="color: #78350f; font-family: monospace;"></div>
+                </div>
+                <p style="margin: 0; font-size: 0.9em; color: var(--text-muted);">
+                    This action cannot be undone. Please enter your password to confirm.
+                </p>
+            </div>
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-main);">
+                    <i class="fas fa-lock" style="margin-right: 6px;"></i>Confirm Password
+                </label>
+                <input type="password" id="deleteEvidencePassword" placeholder="Enter your password" 
+                    style="width: 100%; padding: 12px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-main); font-size: 1em;"
+                    onkeypress="if(event.key==='Enter') executeDeleteEvidence()">
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button onclick="closeDeleteEvidenceModal()" class="btn" style="flex: 1; background: var(--bg-secondary);">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button onclick="executeDeleteEvidence()" class="btn" style="flex: 1; background: #ef4444;">
+                    <i class="fas fa-trash"></i> Delete Permanently
+                </button>
+            </div>
+        </div>
     </div>
 {% endblock %}

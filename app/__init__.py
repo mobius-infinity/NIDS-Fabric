@@ -16,6 +16,10 @@ def create_app(config_class=Config):
     # Gắn extension vào app
     db.init_app(app)
     login_manager.init_app(app)
+    
+    # Khởi tạo IPS Engine
+    from app.core.ips_engine import ips_engine
+    ips_engine.init_app(app)
 
     # Đăng ký Blueprints
     from app.auth.routes import auth_bp

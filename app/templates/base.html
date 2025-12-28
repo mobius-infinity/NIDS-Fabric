@@ -23,24 +23,44 @@
             <i class="fas fa-chart-pie"></i> <span>Dashboard</span>
         </div>
         <div id="menu-flows" class="menu-item" onclick="switchView('flows')">
-            <i class="fas fa-stream"></i> <span>Flows</span>
+            <i class="fas fa-stream"></i> <span>Traffic Flows</span>
         </div>
         <div id="menu-incoming-files" class="menu-item" onclick="switchView('incoming-files')">
-            <i class="fas fa-file"></i> <span>Incoming Files</span>
-        </div>
-        <div id="menu-ips-database" class="menu-item" onclick="switchView('ips-database')">
-            <i class="fas fa-shield"></i> <span>IPS Database</span>
+            <i class="fas fa-file-import"></i> <span>PCAP Files</span>
         </div>
         
-        <div class="menu-section">Binary Models</div>
-        <div class="menu-item" onclick="switchModel(this, 'Random Forest', 'binary')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'LightGBM', 'binary')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'DNN', 'binary')"><i class="fas fa-brain"></i> <span>DNN</span></div>
+        <div class="menu-section">Detection</div>
+        <div id="menu-ips-database" class="menu-item" onclick="switchView('ips-database')">
+            <i class="fas fa-database"></i> <span>IPS Rules</span>
+        </div>
+        <div id="menu-ips-logs" class="menu-item" onclick="switchView('ips-logs')">
+            <i class="fas fa-shield-virus"></i> <span>IPS Detections</span>
+        </div>
+        <div class="menu-item submenu-toggle" onclick="toggleSubmenu('model-submenu')">
+            <i class="fas fa-brain"></i> <span>ML Models</span>
+            <i class="fas fa-chevron-down submenu-arrow" id="model-submenu-arrow" style="margin-left: auto; font-size: 0.75em; transition: transform 0.2s;"></i>
+        </div>
+        <div id="model-submenu" class="submenu" style="display: none; padding-left: 20px;">
+            <div id="menu-consensus" class="menu-item submenu-item" onclick="switchView('flows'); setTimeout(() => { const elem = document.getElementById('consensusLogsBody'); if(elem) elem.scrollIntoView({behavior:'smooth'}); }, 100);">
+                <i class="fas fa-gavel"></i> <span>Consensus Voting</span>
+            </div>
+            <div class="submenu-section" style="font-size: 0.75em; color: var(--text-muted); padding: 8px 12px; text-transform: uppercase;">Binary</div>
+            <div class="menu-item submenu-item" onclick="switchModel(this, 'Random Forest', 'binary')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
+            <div class="menu-item submenu-item" onclick="switchModel(this, 'LightGBM', 'binary')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
+            <div class="menu-item submenu-item" onclick="switchModel(this, 'DNN', 'binary')"><i class="fas fa-network-wired"></i> <span>DNN</span></div>
+            <div class="submenu-section" style="font-size: 0.75em; color: var(--text-muted); padding: 8px 12px; text-transform: uppercase;">Multiclass</div>
+            <div class="menu-item submenu-item" onclick="switchModel(this, 'Random Forest', 'multiclass')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
+            <div class="menu-item submenu-item" onclick="switchModel(this, 'LightGBM', 'multiclass')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
+            <div class="menu-item submenu-item" onclick="switchModel(this, 'DNN', 'multiclass')"><i class="fas fa-network-wired"></i> <span>DNN</span></div>
+        </div>
 
-        <div class="menu-section">Multiclass Models</div>
-        <div class="menu-item" onclick="switchModel(this, 'Random Forest', 'multiclass')"><i class="fas fa-tree"></i> <span>Random Forest</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'LightGBM', 'multiclass')"><i class="fas fa-bolt"></i> <span>LightGBM</span></div>
-        <div class="menu-item" onclick="switchModel(this, 'DNN', 'multiclass')"><i class="fas fa-brain"></i> <span>DNN</span></div>
+        <div class="menu-section">Logs</div>
+        <div id="menu-log-summary" class="menu-item" onclick="switchView('log-summary')">
+            <i class="fas fa-archive"></i> <span>Log Manager</span>
+        </div>
+        <div id="menu-system-logs" class="menu-item" onclick="switchView('system-logs')">
+            <i class="fas fa-server"></i> <span>System Logs</span>
+        </div>
 
         <div class="menu-section" style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border-color);">Configuration</div>
         <div id="menu-settings" class="menu-item" onclick="switchView('settings')">

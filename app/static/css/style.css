@@ -24,10 +24,20 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .menu-item.active { background: #fff7ed; color: var(--text-main); border-right-color: var(--text-main); font-weight: 600; }
 .menu-item i { width: 20px; text-align: center; }
 
+/* Submenu styles */
+.submenu { background: var(--bg-secondary); border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
+.submenu-item { padding: 10px 24px 10px 36px !important; font-size: 0.9em; }
+.submenu-item:hover { background: #fff7ed; }
+.submenu-section { font-size: 0.7em !important; color: var(--text-muted) !important; padding: 6px 24px 4px 36px !important; text-transform: uppercase; font-weight: 600; }
+.submenu-toggle { position: relative; }
+.submenu-arrow { transition: transform 0.2s ease; }
+
 html[data-theme="dark"] .menu-section { color: #cbd5e1; }
 html[data-theme="dark"] .menu-item { color: #cbd5e1; }
 html[data-theme="dark"] .menu-item:hover { background: #3a3a3a; color: var(--text-main); }
 html[data-theme="dark"] .menu-item.active { background: #3a3a3a; color: var(--text-main); border-right-color: var(--text-main); }
+html[data-theme="dark"] .submenu { background: #252525; }
+html[data-theme="dark"] .submenu-item:hover { background: #3a3a3a; }
 
 .user-profile { margin-top: auto; padding: 16px; border-top: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
 .user-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border-color); }
@@ -44,6 +54,8 @@ html[data-theme="dark"] .menu-item.active { background: #3a3a3a; color: var(--te
 .sidebar.collapsed .user-profile a { display: none; }
 .sidebar.collapsed .user-profile .theme-toggle { display: none; }
 .sidebar.collapsed .user-avatar { width: 40px; height: 40px; margin: 0 auto; }
+.sidebar.collapsed .submenu { display: none !important; }
+.sidebar.collapsed .submenu-arrow { display: none; }
 
 .main-content { flex: 1; overflow-y: auto; padding: 32px; position: relative; }
 .view-section { display: none; animation: fadeIn 0.3s ease-out; }
@@ -67,8 +79,8 @@ html[data-theme="dark"] .menu-item.active { background: #3a3a3a; color: var(--te
 .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; background: var(--text-muted); color: white; font-weight: 600; transition: 0.2s; }
 .btn-primary { background: var(--text-main); }
 
-.switch { position: relative; display: inline-block; width: 50px; height: 26px; }
-.switch input { opacity: 0; width: 0; height: 0; }
+.switch, .toggle-switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+.switch input, .toggle-switch input { opacity: 0; width: 0; height: 0; }
 .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px; }
 .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
 input:checked + .slider { background-color: var(--text-main); }

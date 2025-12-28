@@ -27,6 +27,7 @@ from app.globals import (
 # Import ML Logic
 from app.core.pcap_utils import convert_pcap_to_csv, FEATURES_DNN_RF, LIGHTGBM_23_FEATURES
 from app.core.ml_engine import model_cache, get_binary_prediction_vector, predict_logic_full_str
+from app.core.ips_engine import ips_engine
 
 def update_model_log(app, model_name, task, df_results):
     """
@@ -61,10 +62,15 @@ def update_model_log(app, model_name, task, df_results):
     except Exception as e: 
         print(f"[Log Error] Cannot write log: {e}")
 
-def update_consensus_log(app, df_raw, votes, final_decisions, threshold, mode, filename, timestamp):
+def update_consensus_log(app, df_raw, votes, final_decisions, threshold, mode, filename, timestamp, 
+                         detection_sources=None, ips_matches=None):
     """
     Ghi log kết quả consensus/voting từ tất cả models.
     File: Consensus_Voting.csv
+    
+    Args:
+        detection_sources: list of source types ('ML_HIGH_THREAT', 'ML_IPS_CONFIRMED', etc.)
+        ips_matches: list of IPS match results (rule_id, rule_name for each flow)
     """
     try:
         log_path = os.path.join(app.config['LOGS_FOLDER'], "Consensus_Voting.csv")
@@ -82,10 +88,26 @@ def update_consensus_log(app, df_raw, votes, final_decisions, threshold, mode, f
         df_consensus['result'] = ['attack' if d == 1 else 'benign' for d in final_decisions]
         df_consensus['confidence'] = [f"{v}/{6}" for v in votes]  # 6 models total
         
+        # Thêm thông tin Hybrid detection
+        if detection_sources is not None:
+            df_consensus['detection_source'] = detection_sources
+        else:
+            df_consensus['detection_source'] = 'ML_ONLY'
+            
+        if ips_matches is not None:
+            df_consensus['ips_matched'] = [m.get('matched', False) if m else False for m in ips_matches]
+            df_consensus['ips_rule_id'] = [m.get('rule_id', '') if m else '' for m in ips_matches]
+            df_consensus['ips_rule_name'] = [m.get('rule_name', '') if m else '' for m in ips_matches]
+        else:
+            df_consensus['ips_matched'] = False
+            df_consensus['ips_rule_id'] = ''
+            df_consensus['ips_rule_name'] = ''
+        
         # Chọn các cột quan trọng để lưu
         important_cols = ['id', 'time_scaned', 'file_scaned', 'IPV4_SRC_ADDR', 'L4_SRC_PORT', 
                          'IPV4_DST_ADDR', 'L4_DST_PORT', 'PROTOCOL', 'votes', 'threshold',
-                         'detection_mode', 'result', 'confidence']
+                         'detection_mode', 'result', 'confidence', 'detection_source',
+                         'ips_matched', 'ips_rule_id', 'ips_rule_name']
         
         # Chỉ giữ các cột tồn tại
         existing_cols = [c for c in important_cols if c in df_consensus.columns]
@@ -109,6 +131,68 @@ def update_consensus_log(app, df_raw, votes, final_decisions, threshold, mode, f
         combined.tail(10000).to_csv(log_path, index=False, sep='#')
     except Exception as e: 
         print(f"[Consensus Log Error] Cannot write log: {e}")
+
+
+def update_ips_log(app, df_raw, ips_matches, filename, timestamp):
+    """
+    Ghi log các detections từ IPS Engine.
+    File: IPS_Detections.csv
+    
+    Chỉ ghi những flow mà IPS đã match (ips_matches[i]['matched'] == True)
+    """
+    try:
+        log_path = os.path.join(app.config['LOGS_FOLDER'], "IPS_Detections.csv")
+        
+        # Filter only matched flows
+        matched_indices = [i for i, m in enumerate(ips_matches) if m.get('matched', False)]
+        
+        if not matched_indices:
+            return  # No IPS matches to log
+        
+        # Create log entries only for matched flows
+        log_entries = []
+        for i in matched_indices:
+            flow = df_raw.iloc[i]
+            match = ips_matches[i]
+            
+            entry = {
+                'id': uuid.uuid4().hex,
+                'timestamp': timestamp,
+                'file_scaned': filename,
+                'src_ip': flow.get('IPV4_SRC_ADDR', ''),
+                'src_port': flow.get('L4_SRC_PORT', ''),
+                'dst_ip': flow.get('IPV4_DST_ADDR', ''),
+                'dst_port': flow.get('L4_DST_PORT', ''),
+                'protocol': flow.get('PROTOCOL', ''),
+                'rule_id': match.get('rule_id', ''),
+                'rule_name': match.get('rule_name', ''),
+                'severity': match.get('severity', ''),
+                'category': match.get('category', ''),
+                'match_type': match.get('match_type', ''),  # JA3, JA3S, SNI, PORT
+                'ja3_hash': flow.get('JA3C_HASH', ''),
+                'ja3s_hash': flow.get('JA3S_HASH', ''),
+                'sni': flow.get('SSL_SERVER_NAME', ''),
+                'in_bytes': flow.get('IN_BYTES', 0),
+                'out_bytes': flow.get('OUT_BYTES', 0),
+            }
+            log_entries.append(entry)
+        
+        df_new = pd.DataFrame(log_entries)
+        
+        # Append to existing or create new
+        if os.path.exists(log_path):
+            df_old = pd.read_csv(log_path, sep='#')
+            combined = pd.concat([df_old, df_new], ignore_index=True)
+        else:
+            combined = df_new
+        
+        # Keep last 10000 entries
+        combined.tail(10000).to_csv(log_path, index=False, sep='#')
+        
+        print(f"[IPS Log] Logged {len(log_entries)} IPS detections")
+    except Exception as e:
+        print(f"[IPS Log Error] Cannot write log: {e}")
+
 
 def save_pcap_metadata(app, pcap_filename, pcap_size_mb, total_flows, threat_flows, safe_flows, is_threat, timestamp):
     """
@@ -195,6 +279,89 @@ def save_pcap_metadata(app, pcap_filename, pcap_size_mb, total_flows, threat_flo
     except Exception as e:
         print(f"[PCAP Metadata Error] Cannot save metadata: {e}")
         return uuid.uuid4().hex
+
+
+def hybrid_detection(df_raw, votes, threshold, use_ips=True):
+    """
+    Hybrid ML + IPS detection (Low Level / Fast Mode)
+    
+    Logic:
+    - HIGH CONFIDENCE Threat (≥5/6 votes): ALERT ngay, skip IPS
+    - MEDIUM (votes >= threshold nhưng < 5): IPS verify
+        - IPS match → ALERT (confirmed)
+        - IPS no match → SUSPICIOUS
+    - LOW Benign (< threshold): IPS check for false negative
+        - IPS match → ALERT (false negative caught)
+        - IPS no match → ALLOW (verified benign)
+    
+    Returns:
+        final_decisions: numpy array of 0/1
+        detection_sources: list of detection source strings
+        ips_matches: list of IPS match results
+    """
+    n_flows = len(df_raw)
+    final_decisions = np.zeros(n_flows, dtype=int)
+    detection_sources = []
+    ips_matches = []
+    
+    # Reload IPS rules if needed (every 5 minutes)
+    if use_ips:
+        ips_engine.reload_if_needed(interval_seconds=300)
+    
+    for i in range(n_flows):
+        vote = votes[i]
+        flow_data = df_raw.iloc[i].to_dict()
+        
+        # Classify confidence level
+        if vote >= 5:
+            # HIGH CONFIDENCE THREAT - Alert immediately, skip IPS (Low Level mode)
+            final_decisions[i] = 1
+            detection_sources.append('ML_HIGH_THREAT')
+            ips_matches.append({'matched': False, 'rule_id': None, 'rule_name': None})
+            
+        elif vote >= threshold:
+            # MEDIUM CONFIDENCE - Use IPS to verify
+            if use_ips and ips_engine.loaded:
+                ips_result = ips_engine.match_flow(flow_data)
+                ips_matches.append(ips_result)
+                
+                if ips_result['matched']:
+                    # IPS confirms threat
+                    final_decisions[i] = 1
+                    detection_sources.append('ML_IPS_CONFIRMED')
+                else:
+                    # ML says threat but IPS doesn't confirm - mark as suspicious
+                    # Still alert since ML detected it (threshold met)
+                    final_decisions[i] = 1
+                    detection_sources.append('ML_UNCONFIRMED')
+            else:
+                # No IPS, trust ML
+                final_decisions[i] = 1
+                detection_sources.append('ML_ONLY')
+                ips_matches.append({'matched': False, 'rule_id': None, 'rule_name': None})
+                
+        else:
+            # LOW CONFIDENCE (Benign) - IPS check for false negative
+            if use_ips and ips_engine.loaded:
+                ips_result = ips_engine.match_flow(flow_data)
+                ips_matches.append(ips_result)
+                
+                if ips_result['matched']:
+                    # IPS caught false negative!
+                    final_decisions[i] = 1
+                    detection_sources.append('IPS_FALSE_NEGATIVE')
+                else:
+                    # Both ML and IPS agree - verified benign
+                    final_decisions[i] = 0
+                    detection_sources.append('VERIFIED_BENIGN')
+            else:
+                # No IPS, trust ML (benign)
+                final_decisions[i] = 0
+                detection_sources.append('ML_BENIGN')
+                ips_matches.append({'matched': False, 'rule_id': None, 'rule_name': None})
+    
+    return final_decisions, detection_sources, ips_matches
+
 
 def thread_system_stats():
     """Giống hệt app4.py"""
@@ -283,15 +450,22 @@ def thread_pcap_worker(app):
                                 if REALTIME_HISTORY['flows_per_sec']: 
                                     REALTIME_HISTORY['flows_per_sec'][-1] += len(df_raw)
 
-                            # 2. Logic Dự đoán & Voting (Giống hệt app4.py)
-                            final_decisions = np.zeros(len(df_raw))
-                            votes = np.zeros(len(df_raw), dtype=int)  # Initialize votes for consensus log
+                            # 2. Logic Dự đoán & Voting + Hybrid IPS Detection
+                            votes = np.zeros(len(df_raw), dtype=int)
+                            detection_sources = []
+                            ips_matches = []
                             
                             if current_mode == 'rf_only':
                                 model, scaler, _, _ = model_cache.get_model('Random Forest', 'binary')
                                 if model: 
                                     final_decisions = get_binary_prediction_vector(df_raw, model, scaler, 'rf', FEATURES_DNN_RF)
                                     votes = final_decisions.astype(int)  # RF only = 0 or 1 vote
+                                    detection_sources = ['RF_ONLY'] * len(df_raw)
+                                    ips_matches = [{'matched': False, 'rule_id': None, 'rule_name': None}] * len(df_raw)
+                                else:
+                                    final_decisions = np.zeros(len(df_raw))
+                                    detection_sources = ['NO_MODEL'] * len(df_raw)
+                                    ips_matches = [{'matched': False, 'rule_id': None, 'rule_name': None}] * len(df_raw)
                             else:
                                 # Voting mode: Use all 6 models (3 binary + 3 multiclass)
                                 for name, mtype, task, feats in MODELS_CONFIG_LIST:
@@ -300,7 +474,11 @@ def thread_pcap_worker(app):
                                         vec = get_binary_prediction_vector(df_raw, model, scaler, mtype, feats)
                                         if len(vec) == len(votes): 
                                             votes += vec
-                                final_decisions = (votes >= current_thresh).astype(int)
+                                
+                                # Hybrid Detection: ML voting + IPS verification
+                                final_decisions, detection_sources, ips_matches = hybrid_detection(
+                                    df_raw, votes, current_thresh, use_ips=True
+                                )
 
                             # 3. Thống kê
                             n_threats = np.sum(final_decisions)
@@ -313,8 +491,12 @@ def thread_pcap_worker(app):
                             is_threat = n_threats > 0
                             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             
-                            # 4. Ghi Consensus Log (kết quả tổng hợp từ voting)
-                            update_consensus_log(app, df_raw, votes, final_decisions, current_thresh, current_mode, fname, ts)
+                            # 4. Ghi Consensus Log với Hybrid Detection results
+                            update_consensus_log(app, df_raw, votes, final_decisions, current_thresh, 
+                                               current_mode, fname, ts, detection_sources, ips_matches)
+                            
+                            # 4.1 Ghi IPS Detection Log (chỉ những flow IPS matched)
+                            update_ips_log(app, df_raw, ips_matches, fname, ts)
                             
                             # 5. Ghi Log chi tiết cho từng model
                             for name, mtype, task, feats in MODELS_CONFIG_LIST:

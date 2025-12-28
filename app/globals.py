@@ -72,7 +72,7 @@ def load_ips_rules_from_csv(app):
             print("[System] No IPS rules file found (first startup)")
             return
         
-        df = pd.read_csv(ips_rules_path, sep='#')
+        df = pd.read_csv(ips_rules_path, sep='#', low_memory=False)
         
         with IPS_RULES_LOCK:
             IPS_RULES.clear()

@@ -1,0 +1,1 @@
+id#timestamp#file_scaned#src_ip#src_port#dst_ip#dst_port#protocol#rule_id#rule_name#severity#category#in_bytes#out_bytes#match_type#ja3_hash#ja3s_hash#sni

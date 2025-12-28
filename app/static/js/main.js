@@ -250,6 +250,18 @@ function toggleSidebar() {
     setTimeout(() => { if (currentView === 'dashboard') resizeCharts(); }, 320); 
 }
 
+function toggleSubmenu(submenuId) {
+    const submenu = document.getElementById(submenuId);
+    const arrow = document.getElementById(submenuId + '-arrow');
+    if (submenu) {
+        const isHidden = submenu.style.display === 'none';
+        submenu.style.display = isHidden ? 'block' : 'none';
+        if (arrow) {
+            arrow.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+        }
+    }
+}
+
 function switchView(view) {
     document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
     const target = document.getElementById(`view-${view}`); 
@@ -261,6 +273,8 @@ function switchView(view) {
     else if(view==='incoming-files') document.getElementById('menu-incoming-files').classList.add('active');
     else if(view==='settings') document.getElementById('menu-settings').classList.add('active');
     else if(view==='ips-database') document.getElementById('menu-ips-database').classList.add('active');
+    else if(view==='ips-logs') document.getElementById('menu-ips-logs').classList.add('active');
+    else if(view==='log-summary') document.getElementById('menu-log-summary').classList.add('active');
     
     // Stop previous auto-refreshes
     stopFlowsAutoRefresh();
@@ -276,7 +290,15 @@ function switchView(view) {
         startFilesAutoRefresh();
     }
     else if (view === 'ips-database') {
+        loadIPSSources();
         loadIPSRules();
+        startSourcesAutoRefresh();
+    }
+    else if (view === 'ips-logs') {
+        loadIPSLogs();
+    }
+    else if (view === 'log-summary') {
+        loadLogSummary();
     }
     currentView = view;
 }
@@ -1006,10 +1028,27 @@ async function loadConsensusLogs(page = 1) {
             const votes = f.votes || 0;
             const result = f.result || '-';
             const confidence = f.confidence || `${votes}/6`;
+            const detectionSource = f.detection_source || 'ML_ONLY';
             
             // Style based on result
             const resultClass = result === 'attack' ? 'badge-danger' : 'badge-safe';
             const votesColor = votes >= 4 ? '#ef4444' : (votes >= 2 ? '#f59e0b' : '#10b981');
+            
+            // Detection source badge style
+            let sourceClass = 'badge-info';
+            let sourceIcon = 'fa-robot';
+            if (detectionSource.includes('IPS')) {
+                sourceClass = 'badge-warning';
+                sourceIcon = 'fa-shield-alt';
+            }
+            if (detectionSource === 'ML_HIGH_THREAT') {
+                sourceClass = 'badge-danger';
+                sourceIcon = 'fa-exclamation-triangle';
+            }
+            if (detectionSource === 'VERIFIED_BENIGN') {
+                sourceClass = 'badge-safe';
+                sourceIcon = 'fa-check-circle';
+            }
             
             return `<tr style="cursor:pointer; border-bottom:1px solid var(--border-color);" onclick="showConsensusDetails('${f.id}')">
                 <td style="padding:8px;">${num}</td>
@@ -1020,12 +1059,13 @@ async function loadConsensusLogs(page = 1) {
                 <td style="padding:8px; color:#3b82f6; font-weight:600;">${f.IPV4_DST_ADDR || '-'}</td>
                 <td style="padding:8px;">${f.L4_DST_PORT || '-'}</td>
                 <td style="padding:8px; font-weight:700; color:${votesColor};">${confidence}</td>
+                <td style="padding:8px;"><span class="badge ${sourceClass}" title="${detectionSource}"><i class="fas ${sourceIcon}" style="margin-right:4px;"></i>${formatDetectionSource(detectionSource)}</span></td>
                 <td style="padding:8px;"><span class="badge ${resultClass}">${result}</span></td>
             </tr>`;
         }).join('');
         
         document.getElementById('consensusLogsBody').innerHTML = rows || 
-            '<tr><td colspan="9" style="padding:20px; text-align:center; color:var(--text-muted);">No consensus logs available</td></tr>';
+            '<tr><td colspan="10" style="padding:20px; text-align:center; color:var(--text-muted);">No consensus logs available</td></tr>';
         
         updateConsensusPagination();
         updateConsensusSortIndicators();
@@ -1033,8 +1073,23 @@ async function loadConsensusLogs(page = 1) {
     } catch(e) {
         console.error("Consensus Logs Error", e);
         document.getElementById('consensusLogsBody').innerHTML = 
-            '<tr><td colspan="9" style="padding:20px; text-align:center; color:#ef4444;">Error loading logs</td></tr>';
+            '<tr><td colspan="10" style="padding:20px; text-align:center; color:#ef4444;">Error loading logs</td></tr>';
     }
+}
+
+function formatDetectionSource(source) {
+    const sourceMap = {
+        'ML_HIGH_THREAT': 'ML High',
+        'ML_IPS_CONFIRMED': 'ML+IPS',
+        'ML_UNCONFIRMED': 'ML Only',
+        'ML_ONLY': 'ML',
+        'IPS_FALSE_NEGATIVE': 'IPS',
+        'VERIFIED_BENIGN': 'Verified',
+        'ML_BENIGN': 'ML Safe',
+        'RF_ONLY': 'RF',
+        'NO_MODEL': 'None'
+    };
+    return sourceMap[source] || source || 'Unknown';
 }
 
 function updateConsensusPagination() {
@@ -1062,7 +1117,7 @@ function sortConsensusLogs(column) {
 }
 
 function updateConsensusSortIndicators() {
-    const columns = ['time', 'file', 'srcip', 'dstip', 'votes', 'result'];
+    const columns = ['time', 'file', 'srcip', 'dstip', 'votes', 'source', 'result'];
     columns.forEach(col => {
         const el = document.getElementById(`consensusSort${col.charAt(0).toUpperCase() + col.slice(1)}`);
         if (el) {
@@ -1130,6 +1185,17 @@ function showConsensusDetails(flowId) {
             let votesClass = votesPassed ? 'forti-threat' : 'forti-safe';
             let votesBadge = votesPassed ? 'badge-danger' : 'badge-safe';
             
+            // Detection source info
+            let detectionSource = d.detection_source || 'ML_ONLY';
+            let sourceDescription = getDetectionSourceDescription(detectionSource);
+            let sourceIcon = getDetectionSourceIcon(detectionSource);
+            let sourceClass = getDetectionSourceClass(detectionSource);
+            
+            // IPS info
+            let ipsMatched = d.ips_matched === true || d.ips_matched === 'True';
+            let ipsRuleId = d.ips_rule_id || '-';
+            let ipsRuleName = d.ips_rule_name || '-';
+            
             panel.innerHTML = `
                 <div class="forti-group">
                     <div class="forti-group-title">General</div>
@@ -1153,6 +1219,17 @@ function showConsensusDetails(flowId) {
                     <div class="forti-row"><span class="forti-label">Votes</span><span class="forti-val ${votesClass}" style="font-weight:600;">${d.votes || 0} / 6</span></div>
                     <div class="forti-row"><span class="forti-label">Threshold</span><span class="forti-val">${d.threshold || '-'}</span></div>
                     <div class="forti-row"><span class="forti-label">Confidence</span><span class="forti-val">${confidencePercent}%</span></div>
+                </div>
+
+                <div class="forti-group">
+                    <div class="forti-group-title"><i class="fas fa-shield-alt" style="margin-right:6px;"></i>Hybrid Detection</div>
+                    <div class="forti-row"><span class="forti-label">Detection Source</span><span class="badge ${sourceClass}"><i class="fas ${sourceIcon}" style="margin-right:4px;"></i>${formatDetectionSource(detectionSource)}</span></div>
+                    <div class="forti-row"><span class="forti-label">Description</span><span class="forti-val" style="font-size:11px;">${sourceDescription}</span></div>
+                    <div class="forti-row"><span class="forti-label">IPS Matched</span><span class="forti-val ${ipsMatched ? 'forti-threat' : 'forti-safe'}">${ipsMatched ? 'YES' : 'NO'}</span></div>
+                    ${ipsMatched ? `
+                    <div class="forti-row"><span class="forti-label">IPS Rule ID</span><span class="forti-val">${ipsRuleId}</span></div>
+                    <div class="forti-row"><span class="forti-label">IPS Rule Name</span><span class="forti-val" style="font-size:11px;">${ipsRuleName}</span></div>
+                    ` : ''}
                 </div>
 
                 <div class="forti-group">
@@ -1191,6 +1268,51 @@ function showConsensusDetails(flowId) {
             console.error('Error fetching consensus details:', err);
             alert('Error loading details: ' + err.message);
         });
+}
+
+function getDetectionSourceDescription(source) {
+    const descriptions = {
+        'ML_HIGH_THREAT': 'High confidence ML detection (≥5/6 votes) - IPS check skipped',
+        'ML_IPS_CONFIRMED': 'ML detected + IPS signature match - Confirmed threat',
+        'ML_UNCONFIRMED': 'ML detected but IPS did not confirm - Still marked as threat',
+        'ML_ONLY': 'Pure ML detection without IPS verification',
+        'IPS_FALSE_NEGATIVE': 'ML missed but IPS caught! - False negative corrected',
+        'VERIFIED_BENIGN': 'Both ML and IPS agree - Verified safe traffic',
+        'ML_BENIGN': 'ML marked as benign without IPS check',
+        'RF_ONLY': 'Random Forest single-model detection',
+        'NO_MODEL': 'No ML model available'
+    };
+    return descriptions[source] || 'Unknown detection source';
+}
+
+function getDetectionSourceIcon(source) {
+    const icons = {
+        'ML_HIGH_THREAT': 'fa-exclamation-triangle',
+        'ML_IPS_CONFIRMED': 'fa-shield-alt',
+        'ML_UNCONFIRMED': 'fa-robot',
+        'ML_ONLY': 'fa-robot',
+        'IPS_FALSE_NEGATIVE': 'fa-shield-alt',
+        'VERIFIED_BENIGN': 'fa-check-circle',
+        'ML_BENIGN': 'fa-robot',
+        'RF_ONLY': 'fa-tree',
+        'NO_MODEL': 'fa-question-circle'
+    };
+    return icons[source] || 'fa-question-circle';
+}
+
+function getDetectionSourceClass(source) {
+    const classes = {
+        'ML_HIGH_THREAT': 'badge-danger',
+        'ML_IPS_CONFIRMED': 'badge-warning',
+        'ML_UNCONFIRMED': 'badge-info',
+        'ML_ONLY': 'badge-info',
+        'IPS_FALSE_NEGATIVE': 'badge-warning',
+        'VERIFIED_BENIGN': 'badge-safe',
+        'ML_BENIGN': 'badge-safe',
+        'RF_ONLY': 'badge-info',
+        'NO_MODEL': 'badge-secondary'
+    };
+    return classes[source] || 'badge-secondary';
 }
 
 // --- INCOMING FILES MANAGEMENT ---
@@ -1381,6 +1503,9 @@ async function showFileDetails(filename) {
                 <button class="btn" onclick="downloadFile('${data.name.replace(/'/g, "\\'")}')" style="flex:1;">
                     <i class="fas fa-download"></i> Download PCAP
                 </button>
+                <button class="btn" onclick="openDeleteEvidenceModal('${data.name.replace(/'/g, "\\'")}')" style="flex:1; background:#ef4444;">
+                    <i class="fas fa-trash"></i> Delete Evidence
+                </button>
             `;
         } else if (data.is_threat && !data.pcap_exists) {
             actionsHTML = `<div style="padding:8px; background:#fef3c7; color:#d97706; border-radius:4px; text-align:center; font-size:0.9em;">PCAP file not available (deleted)</div>`;
@@ -1430,6 +1555,62 @@ async function downloadFile(filename) {
     } catch(e) {
         console.error('Download Error', e);
         alert('Error downloading file');
+    }
+}
+
+// Evidence PCAP deletion with password verification
+let evidenceToDelete = null;
+
+function openDeleteEvidenceModal(filename) {
+    evidenceToDelete = filename;
+    document.getElementById('deleteEvidenceFilename').textContent = filename;
+    document.getElementById('deleteEvidencePassword').value = '';
+    document.getElementById('deleteEvidenceModal').style.display = 'flex';
+    document.getElementById('deleteEvidencePassword').focus();
+}
+
+function closeDeleteEvidenceModal() {
+    evidenceToDelete = null;
+    document.getElementById('deleteEvidenceModal').style.display = 'none';
+    document.getElementById('deleteEvidencePassword').value = '';
+}
+
+async function executeDeleteEvidence() {
+    if (!evidenceToDelete) {
+        alert('No file selected for deletion');
+        return;
+    }
+    
+    const password = document.getElementById('deleteEvidencePassword').value;
+    
+    if (!password) {
+        alert('Password is required to delete evidence files');
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/delete-evidence-pcap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: evidenceToDelete,
+                password: password
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            alert(data.message);
+            closeDeleteEvidenceModal();
+            closeLogPanel();
+            loadIncomingFiles();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to delete evidence'));
+        }
+    } catch (e) {
+        console.error('Delete Evidence Error', e);
+        alert('Error: ' + e.message);
     }
 }
 
@@ -1525,12 +1706,517 @@ async function loadTopFlows() {
         console.error('Load top flows error:', e);
     }
 }
+
+// --- IPS SOURCES MANAGEMENT ---
+let sourcesRefreshInterval = null;
+
+async function loadIPSSources() {
+    try {
+        const res = await fetch('/api/ips-sources');
+        const data = await res.json();
+        
+        const tbody = document.getElementById('ips-sources-body');
+        if (!tbody) return;
+        
+        if (data.sources && data.sources.length > 0) {
+            tbody.innerHTML = data.sources.map(source => {
+                // Status icon
+                let statusIcon = '';
+                let statusColor = '';
+                if (source.last_status === 'success') {
+                    statusIcon = '<i class="fas fa-check-circle"></i>';
+                    statusColor = '#10b981';
+                } else if (source.last_status === 'error') {
+                    statusIcon = '<i class="fas fa-times-circle"></i>';
+                    statusColor = '#ef4444';
+                } else if (source.last_status === 'pending') {
+                    statusIcon = '<i class="fas fa-clock"></i>';
+                    statusColor = '#f59e0b';
+                } else {
+                    statusIcon = '<i class="fas fa-question-circle"></i>';
+                    statusColor = '#6b7280';
+                }
+                
+                // Truncate URL for display
+                const displayUrl = source.url.length > 50 ? source.url.substring(0, 50) + '...' : source.url;
+                
+                // Format last update
+                const lastUpdate = source.last_update ? new Date(source.last_update).toLocaleString() : 'Never';
+                
+                // Enabled toggle
+                const enabledChecked = source.enabled ? 'checked' : '';
+                
+                // Error tooltip
+                const errorTitle = source.error_message ? `title="${source.error_message}"` : '';
+                
+                return `<tr style="border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="showSourceDetails('${source.id}')">
+                    <td style="padding: 10px; text-align: center;">
+                        <span style="color: ${statusColor}; font-size: 1.2em;" ${errorTitle}>${statusIcon}</span>
+                    </td>
+                    <td style="padding: 10px; font-weight: 600; color: var(--text-main);">${source.name || 'Unnamed'}</td>
+                    <td style="padding: 10px; font-size: 0.85em; color: var(--text-muted);" title="${source.url}">${displayUrl}</td>
+                    <td style="padding: 10px; text-align: center;" onclick="event.stopPropagation();">
+                        <input type="number" value="${source.interval_minutes}" min="1" max="1440" 
+                               style="width: 70px; padding: 4px; border: 1px solid var(--border-color); border-radius: 4px; text-align: center;"
+                               onchange="updateSourceInterval('${source.id}', this.value)">
+                        <span style="font-size: 0.8em; color: var(--text-muted);">min</span>
+                    </td>
+                    <td style="padding: 10px; text-align: center; font-weight: 600; color: var(--text-main);">${source.rules_count || 0}</td>
+                    <td style="padding: 10px; font-size: 0.85em; color: var(--text-muted);">${lastUpdate}</td>
+                    <td style="padding: 10px; text-align: center;" onclick="event.stopPropagation();">
+                        <label class="toggle-switch" style="margin: 0;">
+                            <input type="checkbox" ${enabledChecked} onchange="toggleSourceEnabled('${source.id}', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </td>
+                    <td style="padding: 10px; text-align: center;" onclick="event.stopPropagation();">
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.8em; margin-right: 4px;" onclick="refreshSource('${source.id}')" title="Refresh Now">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.8em; background: #ef4444; border-color: #ef4444;" onclick="deleteSource('${source.id}')" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>`;
+            }).join('');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="8" style="padding: 20px; text-align: center; color: var(--text-muted);">No rule sources configured. Add a source above to enable auto-updates.</td></tr>';
+        }
+    } catch (e) {
+        console.error('Load IPS sources error:', e);
+    }
+}
+
+async function showSourceDetails(sourceId) {
+    try {
+        const res = await fetch(`/api/ips-sources/${sourceId}`);
+        const source = await res.json();
+        
+        if (!res.ok || source.error) {
+            alert('Error loading source details');
+            return;
+        }
+        
+        const panel = document.getElementById('panelContent');
+        const titleElem = document.getElementById('detailPanelTitle');
+        
+        titleElem.innerHTML = '<i class="fas fa-satellite-dish" style="color:var(--text-main); margin-right:8px;"></i> Edit Rule Source';
+        
+        // Status info
+        let statusIcon = '';
+        let statusColor = '';
+        let statusText = '';
+        if (source.last_status === 'success') {
+            statusIcon = '<i class="fas fa-check-circle"></i>';
+            statusColor = '#10b981';
+            statusText = 'Success';
+        } else if (source.last_status === 'error') {
+            statusIcon = '<i class="fas fa-times-circle"></i>';
+            statusColor = '#ef4444';
+            statusText = 'Error';
+        } else if (source.last_status === 'pending') {
+            statusIcon = '<i class="fas fa-clock"></i>';
+            statusColor = '#f59e0b';
+            statusText = 'Pending';
+        } else {
+            statusIcon = '<i class="fas fa-question-circle"></i>';
+            statusColor = '#6b7280';
+            statusText = 'Unknown';
+        }
+        
+        const lastUpdate = source.last_update ? new Date(source.last_update).toLocaleString() : 'Never';
+        const createdAt = source.created_at ? new Date(source.created_at).toLocaleString() : 'Unknown';
+        
+        panel.innerHTML = `
+            <div class="forti-group">
+                <div class="forti-group-title">Source Information</div>
+                <div class="forti-row">
+                    <span class="forti-label">Source ID</span>
+                    <span class="forti-val" style="font-family: monospace;">${source.id}</span>
+                </div>
+                <div class="forti-row">
+                    <span class="forti-label">Created</span>
+                    <span class="forti-val">${createdAt}</span>
+                </div>
+                <div class="forti-row">
+                    <span class="forti-label">Status</span>
+                    <span class="forti-val" style="color: ${statusColor};">${statusIcon} ${statusText}</span>
+                </div>
+                <div class="forti-row">
+                    <span class="forti-label">Last Update</span>
+                    <span class="forti-val">${lastUpdate}</span>
+                </div>
+                <div class="forti-row">
+                    <span class="forti-label">Rules Count</span>
+                    <span class="forti-val" style="font-weight: 600;">${source.rules_count || 0}</span>
+                </div>
+                ${source.error_message ? `
+                <div class="forti-row">
+                    <span class="forti-label">Last Error</span>
+                    <span class="forti-val" style="color: #ef4444; font-size: 0.85em;">${source.error_message}</span>
+                </div>` : ''}
+            </div>
+
+            <div class="forti-group">
+                <div class="forti-group-title">Edit Settings</div>
+                <div style="padding: 8px 0;">
+                    <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">Name</label>
+                    <input type="text" id="edit-source-name" value="${source.name || ''}" 
+                           style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-main);">
+                </div>
+                <div style="padding: 8px 0;">
+                    <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">URL</label>
+                    <input type="text" id="edit-source-url" value="${source.url || ''}" 
+                           style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-main); font-size: 0.85em;">
+                </div>
+                <div style="padding: 8px 0;">
+                    <label style="font-size: 0.85em; color: var(--text-muted); display: block; margin-bottom: 4px;">Update Interval (minutes)</label>
+                    <input type="number" id="edit-source-interval" value="${source.interval_minutes || 10}" min="1" max="1440"
+                           style="width: 120px; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-main);">
+                </div>
+                <div style="padding: 8px 0; display: flex; align-items: center; gap: 10px;">
+                    <label style="font-size: 0.85em; color: var(--text-muted);">Enabled</label>
+                    <label class="toggle-switch" style="margin: 0;">
+                        <input type="checkbox" id="edit-source-enabled" ${source.enabled ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 16px;">
+                <button class="btn" onclick="saveSourceChanges('${source.id}')" style="flex: 1; padding: 10px;">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
+                <button class="btn" onclick="refreshSource('${source.id}'); closeDetails();" style="padding: 10px;">
+                    <i class="fas fa-sync-alt"></i> Refresh Now
+                </button>
+            </div>
+        `;
+        
+        document.getElementById('panelOverlay').classList.add('active');
+        document.getElementById('logDetailPanel').classList.add('active');
+    } catch (e) {
+        console.error('Show source details error:', e);
+        alert('Error loading source details');
+    }
+}
+
+async function saveSourceChanges(sourceId) {
+    try {
+        const name = document.getElementById('edit-source-name').value.trim();
+        const url = document.getElementById('edit-source-url').value.trim();
+        const interval = parseInt(document.getElementById('edit-source-interval').value) || 10;
+        const enabled = document.getElementById('edit-source-enabled').checked;
+        
+        if (!url) {
+            alert('URL cannot be empty');
+            return;
+        }
+        
+        const res = await fetch(`/api/ips-sources/${sourceId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                url: url,
+                interval_minutes: interval,
+                enabled: enabled
+            })
+        });
+        
+        const result = await res.json();
+        
+        if (result.success) {
+            alert('Source updated successfully');
+            closeDetails();
+            loadIPSSources();
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (e) {
+        console.error('Save source changes error:', e);
+        alert('Error saving changes');
+    }
+}
+
+async function addNewSource() {
+    const name = document.getElementById('new-source-name').value.trim();
+    const url = document.getElementById('new-source-url').value.trim();
+    const interval = parseInt(document.getElementById('new-source-interval').value) || 10;
+    const autoRefresh = document.getElementById('new-source-auto-refresh').value === 'true';
+    
+    if (!url) {
+        alert('Please enter a source URL');
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/ips-sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name || 'Unnamed Source',
+                url: url,
+                interval_minutes: interval,
+                auto_refresh: autoRefresh
+            })
+        });
+        
+        const result = await res.json();
+        
+        if (result.success) {
+            alert(result.refresh_result ? 
+                `Source added. Imported ${result.refresh_result.imported_count || 0} rules.` : 
+                'Source added successfully.');
+            
+            // Clear form
+            document.getElementById('new-source-name').value = '';
+            document.getElementById('new-source-url').value = '';
+            document.getElementById('new-source-interval').value = '10';
+            
+            // Reload sources and rules
+            loadIPSSources();
+            loadIPSRules();
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (e) {
+        console.error('Add source error:', e);
+        alert('Error adding source');
+    }
+}
+
+async function updateSourceInterval(sourceId, newInterval) {
+    try {
+        const res = await fetch(`/api/ips-sources/${sourceId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interval_minutes: parseInt(newInterval) })
+        });
+        
+        const result = await res.json();
+        if (!result.success) {
+            alert('Error updating interval: ' + result.message);
+            loadIPSSources(); // Reload to reset
+        }
+    } catch (e) {
+        console.error('Update interval error:', e);
+    }
+}
+
+async function toggleSourceEnabled(sourceId, enabled) {
+    try {
+        const res = await fetch(`/api/ips-sources/${sourceId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: enabled })
+        });
+        
+        const result = await res.json();
+        if (!result.success) {
+            alert('Error toggling source: ' + result.message);
+            loadIPSSources();
+        }
+    } catch (e) {
+        console.error('Toggle source error:', e);
+    }
+}
+
+async function refreshSource(sourceId) {
+    try {
+        // Show loading indicator
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        btn.disabled = true;
+        
+        const res = await fetch(`/api/ips-sources/${sourceId}/refresh`, {
+            method: 'POST'
+        });
+        
+        const result = await res.json();
+        
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        
+        if (result.success) {
+            alert(`Refreshed successfully. Imported ${result.imported_count || 0} rules.`);
+            loadIPSSources();
+            loadIPSRules();
+        } else {
+            alert('Error refreshing: ' + result.message);
+            loadIPSSources();
+        }
+    } catch (e) {
+        console.error('Refresh source error:', e);
+        alert('Error refreshing source');
+    }
+}
+
+async function deleteSource(sourceId) {
+    if (!confirm('Delete this source? Rules imported from this source will remain.')) {
+        return;
+    }
+    
+    try {
+        const res = await fetch(`/api/ips-sources/${sourceId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await res.json();
+        
+        if (result.success) {
+            loadIPSSources();
+        } else {
+            alert('Error deleting source: ' + result.message);
+        }
+    } catch (e) {
+        console.error('Delete source error:', e);
+    }
+}
+
+async function refreshAllSources() {
+    try {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+        btn.disabled = true;
+        
+        const res = await fetch('/api/ips-sources/refresh-all', {
+            method: 'POST'
+        });
+        
+        const result = await res.json();
+        
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        
+        alert(`Updated ${result.updated || 0} sources. Errors: ${result.errors || 0}`);
+        loadIPSSources();
+        loadIPSRules();
+    } catch (e) {
+        console.error('Refresh all sources error:', e);
+    }
+}
+
+// Start background refresh check for sources
+function startSourcesAutoRefresh() {
+    if (sourcesRefreshInterval) {
+        clearInterval(sourcesRefreshInterval);
+    }
+    
+    // Check every 60 seconds for sources that need update
+    sourcesRefreshInterval = setInterval(async () => {
+        try {
+            const res = await fetch('/api/ips-sources');
+            const data = await res.json();
+            
+            if (data.sources) {
+                for (const source of data.sources) {
+                    if (source.enabled && source.needs_update) {
+                        console.log(`[Auto-refresh] Refreshing source: ${source.name}`);
+                        await fetch(`/api/ips-sources/${source.id}/refresh`, { method: 'POST' });
+                    }
+                }
+                
+                // Reload UI if on IPS Database view
+                if (document.getElementById('view-ips-db')?.classList.contains('active')) {
+                    loadIPSSources();
+                    loadIPSRules();
+                }
+            }
+        } catch (e) {
+            console.error('Auto-refresh check error:', e);
+        }
+    }, 60000); // Check every minute
+}
+
 // --- IPS DATABASE FUNCTIONS ---
-async function loadIPSRules() {
+
+// IPS Rules Pagination State
+let ipsCurrentPage = 1;
+let ipsPageSize = 50;
+let ipsTotalRules = 0;
+let ipsTotalPages = 1;
+let ipsSearchTerm = '';
+let ipsSeverityFilter = '';
+let ipsSortBy = 'rule_id';
+let ipsSortOrder = 'asc';
+let ipsSearchTimeout = null;
+
+function debounceIPSSearch() {
+    clearTimeout(ipsSearchTimeout);
+    ipsSearchTimeout = setTimeout(() => {
+        applyIPSFilters();
+    }, 300);
+}
+
+function applyIPSFilters() {
+    ipsSearchTerm = document.getElementById('ipsRulesSearch')?.value || '';
+    ipsSeverityFilter = document.getElementById('ipsSeverityFilter')?.value || '';
+    ipsCurrentPage = 1;
+    loadIPSRules();
+}
+
+function clearIPSFilters() {
+    document.getElementById('ipsRulesSearch').value = '';
+    document.getElementById('ipsSeverityFilter').value = '';
+    const headerSearch = document.getElementById('ipsSearchBox');
+    if (headerSearch) headerSearch.value = '';
+    ipsSearchTerm = '';
+    ipsSeverityFilter = '';
+    ipsCurrentPage = 1;
+    loadIPSRules();
+}
+
+function syncIPSSearch(inputEl) {
+    // Sync header search box with widget search box
+    const widgetSearch = document.getElementById('ipsRulesSearch');
+    if (widgetSearch && inputEl.id === 'ipsSearchBox') {
+        widgetSearch.value = inputEl.value;
+    } else if (inputEl.id === 'ipsRulesSearch') {
+        const headerSearch = document.getElementById('ipsSearchBox');
+        if (headerSearch) headerSearch.value = inputEl.value;
+    }
+    debounceIPSSearch();
+}
+
+function sortIPSRules(column) {
+    if (ipsSortBy === column) {
+        ipsSortOrder = ipsSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        ipsSortBy = column;
+        ipsSortOrder = 'asc';
+    }
+    loadIPSRules();
+}
+
+function updateIPSSortIndicators() {
+    const columns = ['rule_id', 'rule_name', 'category', 'severity'];
+    columns.forEach(col => {
+        const elId = 'ipsSort' + col.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+        const el = document.getElementById(elId);
+        if (el) {
+            if (ipsSortBy === col) {
+                el.textContent = ipsSortOrder === 'asc' ? '↑' : '↓';
+            } else {
+                el.textContent = '';
+            }
+        }
+    });
+}
+
+async function loadIPSRules(page = ipsCurrentPage) {
     try {
         console.log('Loading IPS rules...');
         
-        const res = await fetch('/api/ips-rules');
+        const offset = (page - 1) * ipsPageSize;
+        let url = `/api/ips-rules?offset=${offset}&limit=${ipsPageSize}`;
+        
+        if (ipsSearchTerm) url += `&search=${encodeURIComponent(ipsSearchTerm)}`;
+        if (ipsSeverityFilter) url += `&severity=${encodeURIComponent(ipsSeverityFilter)}`;
+        
+        const res = await fetch(url);
         const data = await res.json();
         
         console.log('IPS Rules Response:', data);
@@ -1544,14 +2230,40 @@ async function loadIPSRules() {
             document.getElementById('stat-low').textContent = data.statistics.low_rules || 0;
         }
         
+        // Update pagination state
+        ipsTotalRules = data.total_rules || 0;
+        ipsTotalPages = Math.max(1, Math.ceil(ipsTotalRules / ipsPageSize));
+        ipsCurrentPage = page;
+        
+        // Sort rules client-side
+        let rules = data.rules || [];
+        if (rules.length > 0) {
+            rules.sort((a, b) => {
+                let valA = a[ipsSortBy] || '';
+                let valB = b[ipsSortBy] || '';
+                
+                // Numeric sort for rule_id if it looks like a number
+                if (ipsSortBy === 'rule_id') {
+                    valA = parseInt(valA) || 0;
+                    valB = parseInt(valB) || 0;
+                }
+                
+                if (ipsSortOrder === 'asc') {
+                    return valA > valB ? 1 : -1;
+                } else {
+                    return valA < valB ? 1 : -1;
+                }
+            });
+        }
+        
         // Render rules table
         const tbody = document.getElementById('ipsRulesBody');
         if (!tbody) return;
         
         tbody.innerHTML = '';
         
-        if (data.rules && data.rules.length > 0) {
-            data.rules.forEach(rule => {
+        if (rules.length > 0) {
+            rules.forEach(rule => {
                 const severityColor = {
                     'Critical': '#ef4444',
                     'High': '#f59e0b',
@@ -1576,8 +2288,51 @@ async function loadIPSRules() {
         } else {
             tbody.innerHTML = '<tr><td colspan="5" style="padding:12px; text-align:center; color:var(--text-muted);">No IPS rules available</td></tr>';
         }
+        
+        // Update pagination UI
+        updateIPSPagination();
+        updateIPSSortIndicators();
+        
     } catch (e) {
         console.error('Load IPS rules error:', e);
+    }
+}
+
+function updateIPSPagination() {
+    const startNum = ipsTotalRules > 0 ? (ipsCurrentPage - 1) * ipsPageSize + 1 : 0;
+    const endNum = Math.min(ipsCurrentPage * ipsPageSize, ipsTotalRules);
+    
+    document.getElementById('ipsRulesInfo').textContent = `Showing ${startNum}-${endNum} of ${ipsTotalRules} rules`;
+    document.getElementById('ipsTotalPagesDisplay').textContent = ipsTotalPages;
+    document.getElementById('ipsPageInput').value = ipsCurrentPage;
+    document.getElementById('ipsPageInput').max = ipsTotalPages;
+    document.getElementById('ipsPrevBtn').disabled = (ipsCurrentPage <= 1);
+    document.getElementById('ipsNextBtn').disabled = (ipsCurrentPage >= ipsTotalPages);
+}
+
+function ipsGoToPage() {
+    const input = document.getElementById('ipsPageInput');
+    let page = parseInt(input.value) || 1;
+    
+    // Clamp to valid range
+    page = Math.max(1, Math.min(page, ipsTotalPages));
+    
+    if (page !== ipsCurrentPage) {
+        loadIPSRules(page);
+    } else {
+        input.value = ipsCurrentPage; // Reset if same page
+    }
+}
+
+function ipsPrevPage() {
+    if (ipsCurrentPage > 1) {
+        loadIPSRules(ipsCurrentPage - 1);
+    }
+}
+
+function ipsNextPage() {
+    if (ipsCurrentPage < ipsTotalPages) {
+        loadIPSRules(ipsCurrentPage + 1);
     }
 }
 
@@ -1769,5 +2524,700 @@ async function deleteIPSRule(ruleId) {
     }
 }
 
-// Initialize IPS rules when switching to IPS database view
-let ipsRulesInitialized = false;
+// --- JA3/TLS FINGERPRINT RULE FUNCTIONS ---
+
+function toggleAddJA3Form() {
+    const form = document.getElementById('add-ja3-form');
+    if (form) {
+        form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+async function addJA3Rule() {
+    const ruleName = document.getElementById('ja3-rule-name')?.value.trim();
+    const category = document.getElementById('ja3-rule-category')?.value || 'C2/Malware';
+    const ja3 = document.getElementById('ja3-rule-ja3')?.value.trim().toLowerCase();
+    const ja3s = document.getElementById('ja3-rule-ja3s')?.value.trim().toLowerCase();
+    const sni = document.getElementById('ja3-rule-sni')?.value.trim().toLowerCase();
+    const severity = document.getElementById('ja3-rule-severity')?.value || 'High';
+    const description = document.getElementById('ja3-rule-description')?.value.trim();
+    
+    // Validation
+    if (!ruleName) {
+        alert('Rule Name is required');
+        return;
+    }
+    
+    if (!ja3 && !ja3s && !sni) {
+        alert('At least one of JA3, JA3S, or SNI must be provided');
+        return;
+    }
+    
+    // Validate JA3/JA3S format (32 char MD5 hex)
+    const md5Regex = /^[a-f0-9]{32}$/;
+    if (ja3 && !md5Regex.test(ja3)) {
+        alert('JA3 fingerprint must be a 32-character MD5 hash (hex)');
+        return;
+    }
+    if (ja3s && !md5Regex.test(ja3s)) {
+        alert('JA3S fingerprint must be a 32-character MD5 hash (hex)');
+        return;
+    }
+    
+    try {
+        const res = await fetch('/api/ips-rules/add-ja3', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                rule_name: ruleName,
+                category: category,
+                ja3: ja3,
+                ja3s: ja3s,
+                sni: sni,
+                severity: severity,
+                description: description
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            alert('JA3 Rule added successfully!');
+            
+            // Clear form
+            document.getElementById('ja3-rule-name').value = '';
+            document.getElementById('ja3-rule-ja3').value = '';
+            document.getElementById('ja3-rule-ja3s').value = '';
+            document.getElementById('ja3-rule-sni').value = '';
+            document.getElementById('ja3-rule-description').value = '';
+            
+            // Hide form and refresh
+            toggleAddJA3Form();
+            loadIPSRules();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to add rule'));
+        }
+    } catch (e) {
+        console.error('Add JA3 rule error:', e);
+        alert('Error adding rule: ' + e.message);
+    }
+}
+
+// --- IPS LOGS FUNCTIONS ---
+
+// IPS Logs Pagination State
+let ipsLogsCurrentPage = 1;
+let ipsLogsPageSize = 50;
+let ipsLogsTotalLogs = 0;
+let ipsLogsTotalPages = 1;
+let ipsLogsSearchTerm = '';
+let ipsLogsSeverityFilter = '';
+let ipsLogsSortBy = 'time';
+let ipsLogsSortOrder = 'desc';
+let ipsLogsSearchTimeout = null;
+
+function debounceIPSLogsSearch() {
+    clearTimeout(ipsLogsSearchTimeout);
+    ipsLogsSearchTimeout = setTimeout(() => {
+        applyIPSLogsFilters();
+    }, 300);
+}
+
+function applyIPSLogsFilters() {
+    ipsLogsSearchTerm = document.getElementById('ipsLogsSearch')?.value || '';
+    ipsLogsSeverityFilter = document.getElementById('ipsLogsSeverityFilter')?.value || '';
+    ipsLogsCurrentPage = 1;
+    loadIPSLogs();
+}
+
+function clearIPSLogsFilters() {
+    document.getElementById('ipsLogsSearch').value = '';
+    document.getElementById('ipsLogsSeverityFilter').value = '';
+    ipsLogsSearchTerm = '';
+    ipsLogsSeverityFilter = '';
+    ipsLogsCurrentPage = 1;
+    loadIPSLogs();
+}
+
+function sortIPSLogs(column) {
+    if (ipsLogsSortBy === column) {
+        ipsLogsSortOrder = ipsLogsSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        ipsLogsSortBy = column;
+        ipsLogsSortOrder = 'desc';
+    }
+    loadIPSLogs();
+}
+
+function updateIPSLogsSortIndicators() {
+    const columns = ['time', 'src_ip', 'dst_ip', 'rule_name', 'severity'];
+    columns.forEach(col => {
+        const colName = col.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+        const el = document.getElementById(`ipsLogsSort${colName}`);
+        if (el) {
+            if (ipsLogsSortBy === col) {
+                el.textContent = ipsLogsSortOrder === 'asc' ? '↑' : '↓';
+            } else {
+                el.textContent = '';
+            }
+        }
+    });
+}
+
+async function loadIPSLogs(page = ipsLogsCurrentPage) {
+    try {
+        const offset = (page - 1) * ipsLogsPageSize;
+        let url = `/api/ips-logs?offset=${offset}&limit=${ipsLogsPageSize}&sort_by=${ipsLogsSortBy}&sort_order=${ipsLogsSortOrder}`;
+        
+        if (ipsLogsSearchTerm) url += `&search=${encodeURIComponent(ipsLogsSearchTerm)}`;
+        if (ipsLogsSeverityFilter) url += `&severity=${encodeURIComponent(ipsLogsSeverityFilter)}`;
+        
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        // Update statistics
+        if (data.statistics) {
+            document.getElementById('ips-stat-total').textContent = data.statistics.total || 0;
+            document.getElementById('ips-stat-critical').textContent = data.statistics.critical || 0;
+            document.getElementById('ips-stat-high').textContent = data.statistics.high || 0;
+            document.getElementById('ips-stat-medium').textContent = data.statistics.medium_low || 0;
+        }
+        
+        // Update pagination state
+        ipsLogsTotalLogs = data.total || 0;
+        ipsLogsTotalPages = Math.max(1, Math.ceil(ipsLogsTotalLogs / ipsLogsPageSize));
+        ipsLogsCurrentPage = page;
+        
+        // Render logs table
+        const tbody = document.getElementById('ipsLogsBody');
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        
+        if (data.logs && data.logs.length > 0) {
+            data.logs.forEach((log, idx) => {
+                const num = offset + idx + 1;
+                const severityColor = {
+                    'Critical': '#ef4444',
+                    'High': '#f59e0b',
+                    'Medium': '#3b82f6',
+                    'Low': '#10b981'
+                }[log.severity] || '#6b7280';
+                
+                // Match type badge color
+                const matchTypeColors = {
+                    'JA3': '#8b5cf6',    // Purple for JA3
+                    'JA3S': '#a855f7',   // Light purple for JA3S
+                    'SNI': '#06b6d4',    // Cyan for SNI
+                    'PORT': '#f59e0b',   // Orange for Port
+                };
+                const matchType = log.match_type || 'PORT';
+                const matchColor = matchTypeColors[matchType] || '#6b7280';
+                
+                const row = document.createElement('tr');
+                row.style.cursor = 'pointer';
+                row.style.borderBottom = '1px solid var(--border-color)';
+                row.onclick = () => showIPSLogDetails(log.id);
+                
+                row.innerHTML = `
+                    <td style="padding:10px;">${num}</td>
+                    <td style="padding:10px;">${log.timestamp || '-'}</td>
+                    <td style="padding:10px;">${log.file_scaned || '-'}</td>
+                    <td style="padding:10px; color:#3b82f6; font-weight:600;">${log.src_ip || '-'}</td>
+                    <td style="padding:10px;">${log.src_port || '-'}</td>
+                    <td style="padding:10px; color:#3b82f6; font-weight:600;">${log.dst_ip || '-'}</td>
+                    <td style="padding:10px;">${log.dst_port || '-'}</td>
+                    <td style="padding:10px; font-size:0.85em;">${log.rule_name || '-'}</td>
+                    <td style="padding:10px; text-align:center;"><span style="background:${matchColor}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75em; font-weight:600;">${matchType}</span></td>
+                    <td style="padding:10px; text-align:center;"><span style="background:${severityColor}; color:white; padding:4px 8px; border-radius:4px; font-size:0.85em; font-weight:600;">${log.severity || '-'}</span></td>
+                `;
+                tbody.appendChild(row);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="10" style="padding:20px; text-align:center; color:var(--text-muted);">No IPS detection logs available</td></tr>';
+        }
+        
+        // Update pagination UI
+        updateIPSLogsPagination();
+        updateIPSLogsSortIndicators();
+        
+    } catch (e) {
+        console.error('Load IPS logs error:', e);
+    }
+}
+
+function updateIPSLogsPagination() {
+    const startNum = ipsLogsTotalLogs > 0 ? (ipsLogsCurrentPage - 1) * ipsLogsPageSize + 1 : 0;
+    const endNum = Math.min(ipsLogsCurrentPage * ipsLogsPageSize, ipsLogsTotalLogs);
+    
+    document.getElementById('ipsLogsInfo').textContent = `Showing ${startNum}-${endNum} of ${ipsLogsTotalLogs} logs`;
+    document.getElementById('ipsLogsTotalPagesDisplay').textContent = ipsLogsTotalPages;
+    document.getElementById('ipsLogsPageInput').value = ipsLogsCurrentPage;
+    document.getElementById('ipsLogsPageInput').max = ipsLogsTotalPages;
+    document.getElementById('ipsLogsPrevBtn').disabled = (ipsLogsCurrentPage <= 1);
+    document.getElementById('ipsLogsNextBtn').disabled = (ipsLogsCurrentPage >= ipsLogsTotalPages);
+}
+
+function ipsLogsGoToPage() {
+    const input = document.getElementById('ipsLogsPageInput');
+    let page = parseInt(input.value) || 1;
+    page = Math.max(1, Math.min(page, ipsLogsTotalPages));
+    
+    if (page !== ipsLogsCurrentPage) {
+        loadIPSLogs(page);
+    } else {
+        input.value = ipsLogsCurrentPage;
+    }
+}
+
+function ipsLogsPrevPage() {
+    if (ipsLogsCurrentPage > 1) {
+        loadIPSLogs(ipsLogsCurrentPage - 1);
+    }
+}
+
+function ipsLogsNextPage() {
+    if (ipsLogsCurrentPage < ipsLogsTotalPages) {
+        loadIPSLogs(ipsLogsCurrentPage + 1);
+    }
+}
+
+async function showIPSLogDetails(logId) {
+    try {
+        const res = await fetch(`/api/ips-logs/${logId}`);
+        const log = await res.json();
+        
+        if (log.error) {
+            alert('Error: ' + log.error);
+            return;
+        }
+        
+        const panel = document.getElementById('panelContent');
+        const titleElem = document.getElementById('detailPanelTitle');
+        
+        titleElem.innerHTML = '<i class="fas fa-shield-alt" style="color:var(--text-main); margin-right:8px;"></i> IPS Detection Details';
+        
+        const severityColor = {
+            'Critical': '#ef4444',
+            'High': '#f59e0b',
+            'Medium': '#3b82f6',
+            'Low': '#10b981'
+        }[log.severity] || '#6b7280';
+        
+        // Match type badge color
+        const matchTypeColors = {
+            'JA3': '#8b5cf6',
+            'JA3S': '#a855f7',
+            'SNI': '#06b6d4',
+            'PORT': '#f59e0b',
+        };
+        const matchType = log.match_type || 'PORT';
+        const matchColor = matchTypeColors[matchType] || '#6b7280';
+        
+        // Build TLS Fingerprint section if applicable
+        let tlsSection = '';
+        if (log.ja3_hash || log.ja3s_hash || log.sni) {
+            tlsSection = `
+            <div class="forti-group">
+                <div class="forti-group-title"><i class="fas fa-fingerprint" style="margin-right:6px;"></i>TLS Fingerprint</div>
+                ${log.ja3_hash ? `<div class="forti-row"><span class="forti-label">JA3 Client</span><span class="forti-val" style="font-family:monospace; font-size:0.85em;">${log.ja3_hash}</span></div>` : ''}
+                ${log.ja3s_hash ? `<div class="forti-row"><span class="forti-label">JA3S Server</span><span class="forti-val" style="font-family:monospace; font-size:0.85em;">${log.ja3s_hash}</span></div>` : ''}
+                ${log.sni ? `<div class="forti-row"><span class="forti-label">SNI</span><span class="forti-val" style="color:#06b6d4;">${log.sni}</span></div>` : ''}
+            </div>
+            `;
+        }
+        
+        panel.innerHTML = `
+            <div class="forti-group">
+                <div class="forti-group-title">Detection Info</div>
+                <div class="forti-row"><span class="forti-label">Timestamp</span><span class="forti-val">${log.timestamp || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">File Source</span><span class="forti-val">${log.file_scaned || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Log ID</span><span class="forti-val" style="font-size:0.85em;">${log.id || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Match Type</span><span style="background:${matchColor}; color:white; padding:4px 10px; border-radius:4px; font-weight:600; font-size:0.9em;">${matchType}</span></div>
+            </div>
+
+            <div class="forti-group">
+                <div class="forti-group-title">Network Info</div>
+                <div class="forti-row"><span class="forti-label">Source IP</span><span class="forti-val forti-ip">${log.src_ip || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Source Port</span><span class="forti-val">${log.src_port || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Dest IP</span><span class="forti-val forti-ip">${log.dst_ip || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Dest Port</span><span class="forti-val">${log.dst_port || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Protocol</span><span class="forti-val">${log.protocol || '-'}</span></div>
+            </div>
+
+            ${tlsSection}
+
+            <div class="forti-group">
+                <div class="forti-group-title">IPS Rule Matched</div>
+                <div class="forti-row"><span class="forti-label">Rule ID</span><span class="forti-val" style="font-family:monospace;">${log.rule_id || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Rule Name</span><span class="forti-val" style="font-size:0.9em;">${log.rule_name || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Category</span><span class="forti-val">${log.category || '-'}</span></div>
+                <div class="forti-row"><span class="forti-label">Severity</span><span style="background:${severityColor}; color:white; padding:4px 10px; border-radius:4px; font-weight:600;">${log.severity || '-'}</span></div>
+            </div>
+
+            <div class="forti-group">
+                <div class="forti-group-title">Traffic Info</div>
+                <div class="forti-row"><span class="forti-label">Bytes In</span><span class="forti-val">${formatBytes(log.in_bytes || 0)}</span></div>
+                <div class="forti-row"><span class="forti-label">Bytes Out</span><span class="forti-val">${formatBytes(log.out_bytes || 0)}</span></div>
+            </div>
+        `;
+        
+        document.getElementById('panelOverlay').classList.add('active');
+        document.getElementById('logDetailPanel').classList.add('active');
+        
+    } catch (e) {
+        console.error('Load IPS log details error:', e);
+        alert('Error loading details: ' + e.message);
+    }
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+async function clearIPSLogs() {
+    if (!confirm('Are you sure you want to clear all IPS detection logs?')) return;
+    
+    try {
+        const res = await fetch('/api/ips-logs/clear', { method: 'POST' });
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            alert(`Cleared ${data.deleted} IPS log entries`);
+            loadIPSLogs();
+        } else {
+            alert(`Error: ${data.message}`);
+        }
+    } catch (e) {
+        alert(`Clear error: ${e.message}`);
+    }
+}
+
+// --- LOG SUMMARY FUNCTIONS ---
+
+async function loadLogSummary() {
+    try {
+        const res = await fetch('/api/logs/summary');
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            renderLogSummary(data.summary, data.total_entries);
+        }
+    } catch (e) {
+        console.error('Load log summary error:', e);
+        alert('Error loading log summary: ' + e.message);
+    }
+}
+
+function renderLogSummary(summary, totalEntries) {
+    // Render statistics cards
+    const statsContainer = document.getElementById('logSummaryStats');
+    if (!statsContainer) return;
+    
+    const logTypes = {
+        'Model Logs': 0,
+        'Consensus Voting': 0,
+        'IPS Logs': 0
+    };
+    
+    for (const [file, info] of Object.entries(summary)) {
+        if (info.type in logTypes) {
+            logTypes[info.type] += info.count;
+        }
+    }
+    
+    statsContainer.innerHTML = `
+        <div class="card" style="text-align: center; padding: 16px;">
+            <div style="font-size: 2em; font-weight: 800; color: var(--text-main);">${totalEntries}</div>
+            <div style="font-size: 0.9em; color: var(--text-muted);">Total Entries</div>
+        </div>
+        <div class="card" style="text-align: center; padding: 16px;">
+            <div style="font-size: 2em; font-weight: 800; color: #3b82f6;">${logTypes['Model Logs']}</div>
+            <div style="font-size: 0.9em; color: var(--text-muted);">Model Logs</div>
+        </div>
+        <div class="card" style="text-align: center; padding: 16px;">
+            <div style="font-size: 2em; font-weight: 800; color: #8b5cf6;">${logTypes['Consensus Voting']}</div>
+            <div style="font-size: 0.9em; color: var(--text-muted);">Consensus Voting</div>
+        </div>
+        <div class="card" style="text-align: center; padding: 16px;">
+            <div style="font-size: 2em; font-weight: 800; color: #ef4444;">${logTypes['IPS Logs']}</div>
+            <div style="font-size: 0.9em; color: var(--text-muted);">IPS Logs</div>
+        </div>
+    `;
+    
+    // Render table
+    const tableContainer = document.getElementById('logSummaryTable');
+    if (!tableContainer) return;
+    
+    const typeColors = {
+        'Model Log': '#3b82f6',
+        'Consensus Voting': '#8b5cf6',
+        'IPS Logs': '#ef4444'
+    };
+    
+    tableContainer.innerHTML = Object.entries(summary).map(([file, info]) => {
+        const color = typeColors[info.type] || '#6b7280';
+        return `
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="padding: 12px; text-align: left;">
+                    <input type="checkbox" class="logCheckbox" value="${file}" data-count="${info.count}">
+                </td>
+                <td style="padding: 12px; text-align: left;">
+                    <span style="color: ${color}; font-weight: 600;">${info.type}</span><br>
+                    <span style="font-size: 0.85em; color: var(--text-muted);">${file}</span>
+                </td>
+                <td style="padding: 12px; text-align: center; font-weight: 600;">${info.count}</td>
+                <td style="padding: 12px; text-align: left;">
+                    <span style="background: ${info.status === 'OK' ? '#10b981' : '#f59e0b'}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8em;">
+                        ${info.status}
+                    </span>
+                </td>
+                <td style="padding: 12px; text-align: left; font-size: 0.85em; color: var(--text-muted);">
+                    ${info.last_updated}
+                </td>
+                <td style="padding: 12px; text-align: center;">
+                    <button class="btn" onclick="deleteSingleLog('${file}')" style="padding: 4px 8px; font-size: 0.8em; background: #f59e0b;">
+                        <i class="fas fa-trash"></i> Clear
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function toggleSelectAllLogs(checkbox) {
+    const checkboxes = document.querySelectorAll('.logCheckbox');
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
+}
+
+async function deleteSingleLog(logFile) {
+    if (!confirm(`Delete all entries from ${logFile}?`)) return;
+    
+    try {
+        const res = await fetch('/api/logs/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                log_files: [logFile]
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            alert(`Deleted ${data.total_deleted} entries`);
+            loadLogSummary();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to delete'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function openBulkDeleteModal() {
+    // Get selected logs from table
+    const selectedCheckboxes = document.querySelectorAll('.logCheckbox:checked');
+    
+    if (selectedCheckboxes.length === 0) {
+        alert('Please select at least one log to delete from the table');
+        return;
+    }
+    
+    // Calculate total entries
+    const logFiles = [];
+    let totalEntries = 0;
+    
+    selectedCheckboxes.forEach(cb => {
+        logFiles.push(cb.value);
+        totalEntries += parseInt(cb.getAttribute('data-count') || 0);
+    });
+    
+    // Show confirmation dialog directly
+    const logList = logFiles.map(f => `• ${f}`).join('\n');
+    const confirmMsg = `Are you sure you want to delete ${totalEntries} entries from ${logFiles.length} log(s)?\n\n${logList}\n\nThis action cannot be undone!`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    // Execute deletion
+    try {
+        const res = await fetch('/api/logs/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                log_files: logFiles
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            alert(`Successfully deleted ${data.total_deleted} entries from ${logFiles.length} logs`);
+            // Uncheck all checkboxes
+            document.querySelectorAll('.logCheckbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAllLogs').checked = false;
+            loadLogSummary();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to delete logs'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+// --- SYSTEM LOGS ---
+let currentSysLogTab = 'api';
+
+function switchSysLogTab(tab) {
+    currentSysLogTab = tab;
+    
+    // Update button styles
+    document.getElementById('syslog-tab-api').style.background = tab === 'api' ? 'var(--text-main)' : 'var(--bg-secondary)';
+    document.getElementById('syslog-tab-api').style.color = tab === 'api' ? 'white' : 'var(--text-main)';
+    
+    document.getElementById('syslog-tab-login').style.background = tab === 'login' ? 'var(--text-main)' : 'var(--bg-secondary)';
+    document.getElementById('syslog-tab-login').style.color = tab === 'login' ? 'white' : 'var(--text-main)';
+    
+    document.getElementById('syslog-tab-system').style.background = tab === 'system' ? 'var(--text-main)' : 'var(--bg-secondary)';
+    document.getElementById('syslog-tab-system').style.color = tab === 'system' ? 'white' : 'var(--text-main)';
+    
+    // Show/hide panels
+    document.getElementById('syslog-api-panel').style.display = tab === 'api' ? 'block' : 'none';
+    document.getElementById('syslog-login-panel').style.display = tab === 'login' ? 'block' : 'none';
+    document.getElementById('syslog-system-panel').style.display = tab === 'system' ? 'block' : 'none';
+    
+    loadSystemLogs();
+}
+
+async function loadSystemLogs() {
+    try {
+        if (currentSysLogTab === 'api') {
+            await loadAPILogs();
+        } else if (currentSysLogTab === 'login') {
+            await loadLoginLogs();
+        } else if (currentSysLogTab === 'system') {
+            await loadSystemMetrics();
+        }
+    } catch (e) {
+        console.error('Error loading system logs:', e);
+    }
+}
+
+async function loadAPILogs() {
+    try {
+        const res = await fetch('/api/system-logs/api-calls?limit=200');
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            const tbody = document.getElementById('apiLogsBody');
+            if (data.logs.length > 0) {
+                tbody.innerHTML = data.logs.map(log => {
+                    let statusColor = '#10b981';
+                    if (parseInt(log.status_code) >= 400) statusColor = '#ef4444';
+                    else if (parseInt(log.status_code) >= 300) statusColor = '#f59e0b';
+                    
+                    return `<tr style="border-bottom: 1px solid var(--border-color);">
+                                <td style="padding: 8px;">${log.timestamp.substring(11, 19)}</td>
+                                <td style="padding: 8px;"><span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 3px; font-weight: 600; font-size: 0.8em;">${log.method}</span></td>
+                                <td style="padding: 8px; font-family: monospace; font-size: 0.8em;">${log.endpoint}</td>
+                                <td style="padding: 8px;">${log.username}</td>
+                                <td style="padding: 8px; color: ${statusColor}; font-weight: 600;">${log.status_code}</td>
+                            </tr>`;
+                }).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">No API calls logged yet</td></tr>';
+            }
+        }
+    } catch (e) {
+        console.error('Error loading API logs:', e);
+    }
+}
+
+async function loadLoginLogs() {
+    try {
+        const res = await fetch('/api/system-logs/logins?limit=200');
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            const tbody = document.getElementById('loginLogsBody');
+            if (data.logs.length > 0) {
+                tbody.innerHTML = data.logs.map(log => {
+                    let statusColor = '#10b981';
+                    let statusBg = '#d1fae5';
+                    if (log.status === 'failed') {
+                        statusColor = '#ef4444';
+                        statusBg = '#fee2e2';
+                    }
+                    
+                    return `<tr style="border-bottom: 1px solid var(--border-color);">
+                                <td style="padding: 8px;">${log.timestamp.substring(11, 19)}</td>
+                                <td style="padding: 8px; font-weight: 600;">${log.username}</td>
+                                <td style="padding: 8px; font-family: monospace; font-size: 0.85em;">${log.ip_address}</td>
+                                <td style="padding: 8px; color: ${statusColor}; font-weight: 600;"><span style="background: ${statusBg}; padding: 2px 8px; border-radius: 3px; text-transform: uppercase; font-size: 0.75em;">${log.status}</span></td>
+                                <td style="padding: 8px; font-size: 0.85em; color: var(--text-muted);">${log.details || '-'}</td>
+                            </tr>`;
+                }).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">No login logs yet</td></tr>';
+            }
+        }
+    } catch (e) {
+        console.error('Error loading login logs:', e);
+    }
+}
+
+async function loadSystemMetrics() {
+    try {
+        const res = await fetch('/api/system-logs/system-metrics?limit=200');
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            const tbody = document.getElementById('systemLogsBody');
+            if (data.logs.length > 0) {
+                tbody.innerHTML = data.logs.map(log => {
+                    let statusColor = '#10b981';
+                    let statusBg = '#d1fae5';
+                    
+                    const value = parseFloat(log.value);
+                    if (log.metric_type === 'cpu' || log.metric_type === 'memory' || log.metric_type === 'disk') {
+                        if (value > 80) {
+                            statusColor = '#ef4444';
+                            statusBg = '#fee2e2';
+                        } else if (value > 60) {
+                            statusColor = '#f59e0b';
+                            statusBg = '#fef3c7';
+                        }
+                    }
+                    
+                    return `<tr style="border-bottom: 1px solid var(--border-color);">
+                                <td style="padding: 8px;">${log.timestamp.substring(11, 19)}</td>
+                                <td style="padding: 8px; font-weight: 600; text-transform: uppercase;">${log.metric_type}</td>
+                                <td style="padding: 8px; font-family: monospace; font-weight: 600;">${log.value}${log.unit ? ' ' + log.unit : ''}</td>
+                                <td style="padding: 8px;"><span style="background: ${statusBg}; color: ${statusColor}; padding: 2px 8px; border-radius: 3px; text-transform: uppercase; font-size: 0.75em; font-weight: 600;">${log.status}</span></td>
+                            </tr>`;
+                }).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="4" style="padding: 12px; text-align: center; color: var(--text-muted);">No system metrics logged yet</td></tr>';
+            }
+        }
+    } catch (e) {
+        console.error('Error loading system metrics:', e);
+    }
+}
+
+function filterAPILogs() {
+    loadAPILogs();
+}
+
+function filterLoginLogs() {
+    loadLoginLogs();
+}
+
+function filterSystemLogs() {
+    loadSystemMetrics();
+}

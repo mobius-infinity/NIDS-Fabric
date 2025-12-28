@@ -4,6 +4,7 @@ from app import create_app, db
 from app.models import User, SystemSettings
 from app.globals import SYSTEM_CONFIG, load_pcap_metadata_from_csv, load_ips_rules_from_csv
 from app.core.worker import thread_system_stats, thread_pcap_worker
+from app.core.system_logger import init_system_logger
 from werkzeug.security import generate_password_hash
 
 app = create_app()
@@ -61,6 +62,10 @@ def create_folders(app):
 if __name__ == '__main__':
     create_folders(app)
     init_db_data(app)
+    
+    # Initialize System Logger
+    init_system_logger(app.config['BASE_FOLDER'])
+    print("[System] System Logger initialized")
     
     # --- KHỞI CHẠY THREAD ---
     # Vì debug=False, chúng ta không cần kiểm tra WERKZEUG_RUN_MAIN nữa.

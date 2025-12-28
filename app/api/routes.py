@@ -5,6 +5,7 @@ import numpy as np
 from flask import Blueprint, jsonify, request, current_app, send_file
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash
 from datetime import datetime
 
 from app import db
@@ -905,7 +906,8 @@ def get_consensus_logs():
             'dstport': 'L4_DST_PORT',
             'result': 'result',
             'votes': 'votes',
-            'confidence': 'confidence'
+            'confidence': 'confidence',
+            'source': 'detection_source'
         }
         
         sort_col = sort_column_map.get(sort_by, 'time_scaned')
@@ -1104,21 +1106,52 @@ def download_file():
 @api_bp.route('/ips-rules')
 @login_required
 def get_ips_rules():
-    """Get IPS rules with pagination"""
+    """Get IPS rules with pagination and search"""
     try:
         # Initialize IPS manager với app context
         ips_manager.init_app(current_app)
         
         offset = request.args.get('offset', 0, type=int)
-        limit = request.args.get('limit', 20, type=int)
+        limit = request.args.get('limit', 50, type=int)
+        search = request.args.get('search', '').strip()
+        severity_filter = request.args.get('severity', '').strip()
+        category_filter = request.args.get('category', '').strip()
         
-        rules = ips_manager.get_all_rules(limit=limit, offset=offset)
+        # Get all rules first for filtering
+        all_rules = ips_manager.get_all_rules(limit=99999, offset=0)
+        
+        # Apply search filter
+        if search:
+            search_lower = search.lower()
+            all_rules = [r for r in all_rules if (
+                search_lower in str(r.get('rule_id', '')).lower() or
+                search_lower in str(r.get('rule_name', '')).lower() or
+                search_lower in str(r.get('category', '')).lower() or
+                search_lower in str(r.get('source', '')).lower()
+            )]
+        
+        # Apply severity filter
+        if severity_filter:
+            all_rules = [r for r in all_rules if r.get('severity', '').lower() == severity_filter.lower()]
+        
+        # Apply category filter
+        if category_filter:
+            all_rules = [r for r in all_rules if r.get('category', '').lower() == category_filter.lower()]
+        
+        total_filtered = len(all_rules)
+        
+        # Apply pagination
+        rules = all_rules[offset:offset + limit]
+        
         stats = ips_manager.get_statistics()
         
         return jsonify({
             "rules": rules,
-            "total_rules": stats.get('total_rules', 0),
-            "statistics": stats
+            "total_rules": total_filtered,
+            "total_all": stats.get('total_rules', 0),
+            "statistics": stats,
+            "offset": offset,
+            "limit": limit
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1202,7 +1235,7 @@ def get_ips_rules_by_category(category):
 @api_bp.route('/ips-rules/import-file', methods=['POST'])
 @login_required
 def import_ips_rules_from_file():
-    """Import IPS rules from uploaded CSV file"""
+    """Import IPS rules from uploaded CSV or Snort/Suricata .rules file"""
     try:
         ips_manager.init_app(current_app)
         
@@ -1213,11 +1246,16 @@ def import_ips_rules_from_file():
         if file.filename == '':
             return jsonify({"success": False, "message": "Empty filename"}), 400
         
-        if not file.filename.endswith('.csv'):
-            return jsonify({"success": False, "message": "Only CSV files are supported"}), 400
-        
-        # Import từ file
-        result = ips_manager.import_rules_from_file(file.stream)
+        # Hỗ trợ cả CSV và .rules file
+        if file.filename.endswith('.csv'):
+            # Import từ CSV file
+            result = ips_manager.import_rules_from_file(file.stream)
+        elif file.filename.endswith('.rules'):
+            # Import từ Snort/Suricata .rules file
+            rules_text = file.stream.read().decode('utf-8', errors='ignore')
+            result = ips_manager.import_snort_rules(rules_text)
+        else:
+            return jsonify({"success": False, "message": "Supported formats: .csv, .rules"}), 400
         
         return jsonify(result), 200 if result.get('success') else 400
     except Exception as e:
@@ -1247,6 +1285,54 @@ def import_ips_rules_from_url():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
+@api_bp.route('/ips-rules/add-ja3', methods=['POST'])
+@login_required
+def add_ja3_rule():
+    """Add a JA3/TLS fingerprint rule"""
+    try:
+        ips_manager.init_app(current_app)
+        data = request.get_json()
+        
+        rule_name = data.get('rule_name', '').strip()
+        category = data.get('category', 'C2/Malware')
+        ja3 = data.get('ja3', '').strip().lower()
+        ja3s = data.get('ja3s', '').strip().lower()
+        sni = data.get('sni', '').strip().lower()
+        severity = data.get('severity', 'High')
+        description = data.get('description', '')
+        
+        if not rule_name:
+            return jsonify({"status": "error", "message": "Rule name is required"}), 400
+        
+        if not ja3 and not ja3s and not sni:
+            return jsonify({"status": "error", "message": "At least one of JA3, JA3S, or SNI is required"}), 400
+        
+        # Validate JA3/JA3S format
+        import re
+        md5_pattern = re.compile(r'^[a-f0-9]{32}$')
+        if ja3 and not md5_pattern.match(ja3):
+            return jsonify({"status": "error", "message": "JA3 must be a 32-character MD5 hash"}), 400
+        if ja3s and not md5_pattern.match(ja3s):
+            return jsonify({"status": "error", "message": "JA3S must be a 32-character MD5 hash"}), 400
+        
+        result = ips_manager.add_ja3_rule(
+            rule_name=rule_name,
+            category=category,
+            ja3=ja3,
+            ja3s=ja3s,
+            sni=sni,
+            severity=severity,
+            description=description
+        )
+        
+        if result.get('success'):
+            return jsonify({"status": "success", "message": result.get('message'), "rule_id": result.get('rule_id')}), 200
+        else:
+            return jsonify({"status": "error", "message": result.get('message')}), 400
+            
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @api_bp.route('/ips-rules/<rule_id>', methods=['DELETE'])
 @login_required
 def delete_ips_rule(rule_id):
@@ -1261,3 +1347,509 @@ def delete_ips_rule(rule_id):
             return jsonify({"success": False, "message": "Rule not found"}), 404
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
+
+# ============= IPS SOURCES API =============
+
+@api_bp.route('/ips-sources')
+@login_required
+def get_ips_sources():
+    """Get all IPS rule sources"""
+    try:
+        ips_manager.init_app(current_app)
+        sources = ips_manager.get_all_sources()
+        
+        # Clean NaN values for JSON serialization
+        for source in sources:
+            for key, value in source.items():
+                if pd.isna(value):
+                    source[key] = None
+        
+        return jsonify({"sources": sources})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-sources', methods=['POST'])
+@login_required
+def add_ips_source():
+    """Add a new IPS rule source"""
+    try:
+        ips_manager.init_app(current_app)
+        
+        data = request.json
+        if not data:
+            return jsonify({"success": False, "message": "No data provided"}), 400
+        
+        name = data.get('name', 'Unnamed Source')
+        url = data.get('url')
+        interval = data.get('interval_minutes', 10)
+        
+        if not url:
+            return jsonify({"success": False, "message": "URL is required"}), 400
+        
+        result = ips_manager.add_source(name, url, interval)
+        
+        # Nếu thêm thành công và có auto_refresh, refresh ngay
+        if result.get('success') and data.get('auto_refresh', True):
+            source_id = result.get('source_id')
+            if source_id:
+                refresh_result = ips_manager.refresh_source(source_id)
+                result['refresh_result'] = refresh_result
+        
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@api_bp.route('/ips-sources/<source_id>')
+@login_required
+def get_ips_source_details(source_id):
+    """Get details of a specific IPS source"""
+    try:
+        ips_manager.init_app(current_app)
+        source = ips_manager.get_source_by_id(source_id)
+        
+        if not source:
+            return jsonify({"error": "Source not found"}), 404
+        
+        return jsonify(source)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/ips-sources/<source_id>', methods=['PUT'])
+@login_required
+def update_ips_source(source_id):
+    """Update an IPS source settings"""
+    try:
+        ips_manager.init_app(current_app)
+        
+        data = request.json
+        if not data:
+            return jsonify({"success": False, "message": "No data provided"}), 400
+        
+        result = ips_manager.update_source(source_id, **data)
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@api_bp.route('/ips-sources/<source_id>', methods=['DELETE'])
+@login_required
+def delete_ips_source(source_id):
+    """Delete an IPS source"""
+    try:
+        ips_manager.init_app(current_app)
+        result = ips_manager.delete_source(source_id)
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@api_bp.route('/ips-sources/<source_id>/refresh', methods=['POST'])
+@login_required
+def refresh_ips_source(source_id):
+    """Manually refresh rules from a source"""
+    try:
+        ips_manager.init_app(current_app)
+        result = ips_manager.refresh_source(source_id)
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@api_bp.route('/ips-sources/refresh-all', methods=['POST'])
+@login_required
+def refresh_all_ips_sources():
+    """Refresh all sources that need update"""
+    try:
+        ips_manager.init_app(current_app)
+        result = ips_manager.refresh_all_sources()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+# --- IPS LOGS API ---
+
+@api_bp.route('/ips-logs')
+@login_required
+def get_ips_logs():
+    """Get IPS detection logs with pagination and filtering"""
+    try:
+        logs_folder = current_app.config['LOGS_FOLDER']
+        log_path = os.path.join(logs_folder, 'IPS_Detections.csv')
+        
+        offset = request.args.get('offset', 0, type=int)
+        limit = request.args.get('limit', 50, type=int)
+        search = request.args.get('search', '').strip()
+        severity_filter = request.args.get('severity', '').strip()
+        sort_by = request.args.get('sort_by', 'time').strip()
+        sort_order = request.args.get('sort_order', 'desc').strip()
+        
+        if not os.path.exists(log_path):
+            return jsonify({
+                "logs": [],
+                "total": 0,
+                "statistics": {
+                    "total": 0,
+                    "critical": 0,
+                    "high": 0,
+                    "medium_low": 0
+                }
+            })
+        
+        df = pd.read_csv(log_path, sep='#')
+        df.columns = [str(c).strip() for c in df.columns]
+        
+        # Calculate statistics before filtering
+        stats = {
+            "total": len(df),
+            "critical": len(df[df['severity'].str.lower() == 'critical']) if 'severity' in df.columns else 0,
+            "high": len(df[df['severity'].str.lower() == 'high']) if 'severity' in df.columns else 0,
+            "medium_low": len(df[df['severity'].str.lower().isin(['medium', 'low'])]) if 'severity' in df.columns else 0
+        }
+        
+        # Apply search filter
+        if search:
+            search_lower = search.lower()
+            mask = df.astype(str).apply(lambda x: x.str.contains(search_lower, case=False, na=False).any(), axis=1)
+            df = df[mask]
+        
+        # Apply severity filter
+        if severity_filter:
+            df = df[df['severity'].str.lower() == severity_filter.lower()]
+        
+        # Sort
+        sort_column_map = {
+            'time': 'timestamp',
+            'src_ip': 'src_ip',
+            'dst_ip': 'dst_ip',
+            'rule_name': 'rule_name',
+            'severity': 'severity'
+        }
+        sort_col = sort_column_map.get(sort_by, 'timestamp')
+        if sort_col in df.columns:
+            ascending = (sort_order == 'asc')
+            df = df.sort_values(by=sort_col, ascending=ascending, na_position='last')
+        
+        total_filtered = len(df)
+        
+        # Apply pagination
+        logs = df.iloc[offset:offset + limit].fillna('').to_dict('records')
+        
+        return jsonify({
+            "logs": logs,
+            "total": total_filtered,
+            "statistics": stats,
+            "offset": offset,
+            "limit": limit
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/ips-logs/<log_id>')
+@login_required
+def get_ips_log_details(log_id):
+    """Get detailed information about a specific IPS log entry"""
+    try:
+        logs_folder = current_app.config['LOGS_FOLDER']
+        log_path = os.path.join(logs_folder, 'IPS_Detections.csv')
+        
+        if not os.path.exists(log_path):
+            return jsonify({"error": "Log file not found"}), 404
+        
+        df = pd.read_csv(log_path, sep='#')
+        df.columns = [str(c).strip() for c in df.columns]
+        
+        rec = df[df['id'].astype(str).str.strip() == str(log_id).strip()]
+        
+        if rec.empty:
+            return jsonify({"error": "Log entry not found"}), 404
+        
+        return jsonify(rec.iloc[0].replace({np.nan: None}).to_dict())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/ips-logs/clear', methods=['POST'])
+@login_required
+def clear_ips_logs():
+    """Clear IPS detection logs"""
+    try:
+        logs_folder = current_app.config['LOGS_FOLDER']
+        log_path = os.path.join(logs_folder, 'IPS_Detections.csv')
+        
+        if not os.path.exists(log_path):
+            return jsonify({"status": "success", "deleted": 0})
+        
+        df = pd.read_csv(log_path, sep='#')
+        total_deleted = len(df)
+        
+        # Clear file but keep header
+        df_empty = pd.DataFrame(columns=df.columns)
+        df_empty.to_csv(log_path, index=False, sep='#')
+        
+        return jsonify({
+            "status": "success",
+            "deleted": total_deleted
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# --- LOG SUMMARY API ---
+
+@api_bp.route('/logs/summary')
+@login_required
+def get_logs_summary():
+    """Get summary of all logs"""
+    try:
+        logs_folder = current_app.config['LOGS_FOLDER']
+        summary = {}
+        
+        # Model Logs
+        model_logs = [
+            'DNN_binary.csv', 'DNN_multiclass.csv',
+            'LightGBM_binary.csv', 'LightGBM_multiclass.csv',
+            'Random_Forest_binary.csv', 'Random_Forest_multiclass.csv'
+        ]
+        
+        for log_file in model_logs:
+            log_path = os.path.join(logs_folder, log_file)
+            count = 0
+            last_updated = 'Never'
+            if os.path.exists(log_path):
+                try:
+                    df = pd.read_csv(log_path, sep='#')
+                    count = len(df)
+                    if count > 0 and 'timestamp' in df.columns:
+                        last_updated = str(df['timestamp'].iloc[-1])
+                except:
+                    pass
+            
+            summary[log_file] = {
+                'type': 'Model Log',
+                'count': count,
+                'last_updated': last_updated,
+                'status': 'OK' if count > 0 else 'Empty'
+            }
+        
+        # Consensus Voting Logs
+        consensus_path = os.path.join(logs_folder, 'Consensus_Voting.csv')
+        count = 0
+        last_updated = 'Never'
+        if os.path.exists(consensus_path):
+            try:
+                df = pd.read_csv(consensus_path, sep='#')
+                count = len(df)
+                if count > 0 and 'timestamp' in df.columns:
+                    last_updated = str(df['timestamp'].iloc[-1])
+            except:
+                pass
+        
+        summary['Consensus_Voting.csv'] = {
+            'type': 'Consensus Voting',
+            'count': count,
+            'last_updated': last_updated,
+            'status': 'OK' if count > 0 else 'Empty'
+        }
+        
+        # IPS Logs
+        ips_path = os.path.join(logs_folder, 'IPS_Detections.csv')
+        count = 0
+        last_updated = 'Never'
+        if os.path.exists(ips_path):
+            try:
+                df = pd.read_csv(ips_path, sep='#')
+                count = len(df)
+                if count > 0 and 'timestamp' in df.columns:
+                    last_updated = str(df['timestamp'].iloc[-1])
+            except:
+                pass
+        
+        summary['IPS_Detections.csv'] = {
+            'type': 'IPS Logs',
+            'count': count,
+            'last_updated': last_updated,
+            'status': 'OK' if count > 0 else 'Empty'
+        }
+        
+        # Calculate total
+        total_entries = sum([s['count'] for s in summary.values()])
+        
+        return jsonify({
+            'status': 'success',
+            'summary': summary,
+            'total_entries': total_entries
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@api_bp.route('/logs/delete', methods=['POST'])
+@login_required
+def delete_logs():
+    """Delete logs - support bulk deletion"""
+    try:
+        data = request.get_json()
+        log_files = data.get('log_files', [])
+        
+        if not log_files:
+            return jsonify({'status': 'error', 'message': 'No logs selected'}), 400
+        
+        logs_folder = current_app.config['LOGS_FOLDER']
+        deleted_count = 0
+        deleted_logs = []
+        
+        for log_file in log_files:
+            # Validate filename to prevent path traversal
+            if '..' in log_file or '/' in log_file:
+                continue
+            
+            log_path = os.path.join(logs_folder, log_file)
+            
+            if os.path.exists(log_path) and log_path.startswith(logs_folder):
+                try:
+                    df = pd.read_csv(log_path, sep='#')
+                    count = len(df)
+                    
+                    # Clear file but keep header
+                    df_empty = pd.DataFrame(columns=df.columns)
+                    df_empty.to_csv(log_path, index=False, sep='#')
+                    
+                    deleted_count += count
+                    deleted_logs.append({
+                        'file': log_file,
+                        'entries': count
+                    })
+                except:
+                    pass
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Deleted {deleted_count} entries from {len(deleted_logs)} logs',
+            'deleted_logs': deleted_logs,
+            'total_deleted': deleted_count
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# --- SYSTEM LOGS ENDPOINTS ---
+
+@api_bp.route('/system-logs/api-calls')
+@login_required
+def get_api_logs():
+    """Get API call logs"""
+    try:
+        from app.core.system_logger import get_system_logger
+        logger = get_system_logger()
+        
+        limit = request.args.get('limit', 100, type=int)
+        logs = logger.get_api_logs(limit=limit)
+        
+        return jsonify({
+            'status': 'success',
+            'logs': logs,
+            'total': len(logs)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@api_bp.route('/system-logs/logins')
+@login_required
+def get_login_logs():
+    """Get user login logs"""
+    try:
+        from app.core.system_logger import get_system_logger
+        logger = get_system_logger()
+        
+        limit = request.args.get('limit', 100, type=int)
+        logs = logger.get_login_logs(limit=limit)
+        
+        return jsonify({
+            'status': 'success',
+            'logs': logs,
+            'total': len(logs)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@api_bp.route('/system-logs/system-metrics')
+@login_required
+def get_system_metrics():
+    """Get system metrics logs and current metrics"""
+    try:
+        from app.core.system_logger import get_system_logger
+        logger = get_system_logger()
+        
+        limit = request.args.get('limit', 100, type=int)
+        logs = logger.get_system_logs(limit=limit)
+        current_metrics = logger.get_current_system_metrics()
+        
+        return jsonify({
+            'status': 'success',
+            'logs': logs,
+            'current_metrics': current_metrics,
+            'total': len(logs)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@api_bp.route('/delete-evidence-pcap', methods=['POST'])
+@login_required
+def delete_evidence_pcap():
+    """Delete evidence PCAP file with password verification (force delete)"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+        
+        filename = data.get('filename')
+        password = data.get('password')
+        
+        # Validate required fields
+        if not filename:
+            return jsonify({'status': 'error', 'message': 'Filename is required'}), 400
+        
+        if not password:
+            return jsonify({'status': 'error', 'message': 'Password verification required to delete evidence'}), 403
+        
+        # Verify password against current user
+        user = User.query.get(current_user.id)
+        if not user or not check_password_hash(user.password, password):
+            return jsonify({'status': 'error', 'message': 'Invalid password'}), 403
+        
+        # Secure filename to prevent path traversal
+        safe_filename = secure_filename(filename)
+        if not safe_filename:
+            return jsonify({'status': 'error', 'message': 'Invalid filename'}), 400
+        
+        evidence_folder = current_app.config['EVIDENCE_FOLDER']
+        filepath = os.path.join(evidence_folder, safe_filename)
+        
+        # Verify file exists and is within evidence folder
+        if not os.path.exists(filepath):
+            return jsonify({'status': 'error', 'message': 'Evidence file not found'}), 404
+        
+        if not filepath.startswith(evidence_folder):
+            return jsonify({'status': 'error', 'message': 'Access denied'}), 403
+        
+        # Delete the file
+        os.remove(filepath)
+        
+        # Update PCAP metadata to mark as deleted
+        with PCAP_METADATA_LOCK:
+            for pcap_id, metadata in PCAP_METADATA.items():
+                if metadata.get('pcap_name') == safe_filename:
+                    metadata['pcap_exists'] = False
+                    break
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Evidence file "{safe_filename}" deleted successfully'
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
